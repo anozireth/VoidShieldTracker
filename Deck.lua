@@ -68,14 +68,11 @@ end
 -- ============================================================
 function deck:OnPlayerAura()
     local hasBuff = false
-    for i = 1, 100 do
-        local aura = UnitAura("player", i, "PLAYER|HELPFUL")
-        if not aura then break end
+    AuraUtil.ForEachAura("player", "HELPFUL", nil, function(aura)
         if aura.name == PROC_BUFF_NAME then
             hasBuff = true
-            break
         end
-    end
+    end)
 
     if hasBuff then
         -- Proc buff present -> deck is at 0 (waiting for next Penance)
