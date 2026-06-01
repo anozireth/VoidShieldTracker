@@ -83,11 +83,11 @@ end)
 -- Initialization entry point (called from PLAYER_LOGIN event)
 -- ============================================================
 function addon:OnLogin()
+    -- Build UI FIRST (so OnPlayerAura has addon.ui available during init)
+    self.ui:Create()
+
     -- Initialize deck state
     self.deck:Initialize()
-
-    -- Build UI
-    self.ui:Create()
 
     -- Restore saved position
     local db = VSTDB or {}

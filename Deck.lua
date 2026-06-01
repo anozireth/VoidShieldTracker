@@ -87,9 +87,8 @@ function deck:OnPlayerAura()
         if deckCount > 0 then
             ResetDeck()
         end
-
     elseif deckCount < 3 then
-        -- Proc buff absent and deck not full -> Penance was cast
+        -- Proc buff absent and deck not full -- Penance was cast
         -- If a proc buff arrived since last cast, mark the previous slot as proc
         if procPending and deckCount >= 1 then
             addon.ui:SetIcon(deckCount, "proc")
