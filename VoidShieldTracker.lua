@@ -133,19 +133,15 @@ local function ResetDeck()
 end
 
 local function OnPenanceCast()
-    -- If a proc buff arrived since last cast, mark the previous slot as proc
-    if procPending then
-        -- Find the last unmarked slot and mark it as proc
-        for i = deckCount, 1, -1 do
-            if not marked[i] then
-                SetIcon(i, "proc")
-                marked[i] = true
-                history[#history + 1] = 1
-                if #history > HISTORY_MAX then table.remove(history, 1) end
-                procPending = false
-                break
-            end
+    -- If a proc buff arrived since last cast, mark the PREVIOUS slot as proc
+    -- (overriding the non-proc default we set when that cast happened)
+    if procPending and deckCount >= 1 then
+        SetIcon(deckCount, "proc")
+        -- Update history: change last entry from 0 to 1
+        if #history > 0 and history[#history] == 0 then
+            history[#history] = 1
         end
+        procPending = false
     end
 
     -- Draw the next card (increment deck count)
@@ -157,13 +153,11 @@ local function OnPenanceCast()
         deckCount = 1
     end
 
-    -- Mark this slot as non-proc (default; proc buff may override later)
-    if not marked[deckCount] then
-        SetIcon(deckCount, "noproc")
-        marked[deckCount] = true
-        history[#history + 1] = 0
-        if #history > HISTORY_MAX then table.remove(history, 1) end
-    end
+    -- Mark this slot as non-proc (default; proc buff may override on next cast)
+    SetIcon(deckCount, "noproc")
+    marked[deckCount] = true
+    history[#history + 1] = 0
+    if #history > HISTORY_MAX then table.remove(history, 1) end
 
     -- Deck complete? Schedule reset after 1 second
     if deckCount >= 3 then
