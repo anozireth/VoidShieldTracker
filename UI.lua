@@ -162,6 +162,11 @@ function ui:CreateMinimapButton()
     end)
 
     ui.minimapButton = btn
+
+    -- Show minimap button after a short delay (Minimap may not be ready yet)
+    C_Timer.After(0.5, function()
+        btn:Show()
+    end)
 end
 
 -- ============================================================

@@ -35,7 +35,6 @@ local EVENT_LIST = {
     "UNIT_AURA",
     "GROUP_ROSTER_UPDATE",
     "PLAYER_ENTERING_WORLD",
-    "MINIMAP_BUTTONS_REGISTERED",
 }
 for _, e in ipairs(EVENT_LIST) do
     eventFrame:RegisterEvent(e)
@@ -87,11 +86,6 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
 
     elseif event == "PLAYER_ENTERING_WORLD" then
         addon.deck:OnEnterWorld()
-
-    elseif event == "MINIMAP_BUTTONS_REGISTERED" then
-        if addon.ui and addon.ui.minimapButton then
-            addon.ui.minimapButton:Show()
-        end
     end
 end)
 
