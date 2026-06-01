@@ -56,70 +56,6 @@ local function ResetDeck()
 end
 
 -- ============================================================
--- Aura check (called from UNIT_AURA event on "player")
---
--- State machine for tracking Penance casts and the proc buff:
---
---   buff PRESENT at login -> deckCount = 0 (waiting for Penance)
---   buff ABSENT at login  -> deckCount = 1 (Penance already cast since last reset)
---   buff reappears        -> mark current slot as proc, procPending = false
---   buff absent (while deckCount < 3) -> Penance cast, increment deck
---   deckCount reaches 3   -> reset after 1 second (buff reapplies then)
--- ============================================================
-function deck:OnPlayerAura()
-    local hasBuff = false
-    AuraUtil.ForEachAura("player", "HELPFUL", nil, function(aura)
-        if aura.name == PROC_BUFF_NAME then
-            hasBuff = true
-        end
-    end)
-
-    if hasBuff then
-        -- Proc buff present -> deck is at 0 (waiting for next Penance)
-        -- Mark the deck as having a proc pending for the NEXT cast
-        procPending = true
-
-        -- If deckCount was non-zero, this means the deck already reset
-        -- (buff reapplied after reaching 3) -- reset cleanly
-        if deckCount > 0 then
-            ResetDeck()
-        end
-    elseif deckCount < 3 then
-        -- Proc buff absent and deck not full -- Penance was cast
-        -- If a proc buff arrived since last cast, mark the previous slot as proc
-        if procPending and deckCount >= 1 then
-            addon.ui:SetIcon(deckCount, "proc")
-            -- Update history: change last entry from 0 to 1
-            if #history > 0 and history[#history] == 0 then
-                history[#history] = 1
-            end
-        end
-        procPending = false
-
-        -- Draw the next card (increment deck count)
-        deckCount = deckCount + 1
-
-        -- Mark this slot as non-proc (default; proc buff may override on reappearance)
-        addon.ui:SetIcon(deckCount, "noproc")
-        marked[deckCount] = true
-        history[#history + 1] = 0
-        if #history > HISTORY_MAX then table.remove(history, 1) end
-
-        -- Deck complete? Schedule reset after 1 second
-        if deckCount >= 3 then
-            C_Timer.After(1, function()
-                ResetDeck()
-            end)
-        end
-
-        -- Smart detection check (only outside dungeons)
-        if not inDungeon and not historyLocked then
-            CheckSmartDetection()
-        end
-    end
-end
-
--- ============================================================
 -- Smart detection (outside dungeons)
 -- ============================================================
 local function CheckSmartDetection()
@@ -177,6 +113,70 @@ local function CheckSmartDetection()
                 "|cff88ccffVoid Shield Tracker|r: Deck boundary detected (4 non-procs)",
                 0.5, 0.7, 1)
             return
+        end
+    end
+end
+
+-- ============================================================
+-- Aura check (called from UNIT_AURA event on "player")
+--
+-- State machine for tracking Penance casts and the proc buff:
+--
+--   buff PRESENT at login -> deckCount = 0 (waiting for Penance)
+--   buff ABSENT at login  -> deckCount = 1 (Penance already cast since last reset)
+--   buff reappears        -> mark current slot as proc, procPending = false
+--   buff absent (while deckCount < 3) -> Penance cast, increment deck
+--   deckCount reaches 3   -> reset after 1 second (buff reapplies then)
+-- ============================================================
+function deck:OnPlayerAura()
+    local hasBuff = false
+    AuraUtil.ForEachAura("player", "HELPFUL", nil, function(aura)
+        if aura.name == PROC_BUFF_NAME then
+            hasBuff = true
+        end
+    end)
+
+    if hasBuff then
+        -- Proc buff present -> deck is at 0 (waiting for next Penance)
+        -- Mark the deck as having a proc pending for the NEXT cast
+        procPending = true
+
+        -- If deckCount was non-zero, this means the deck already reset
+        -- (buff reapplied after reaching 3) -- reset cleanly
+        if deckCount > 0 then
+            ResetDeck()
+        end
+    elseif deckCount < 3 then
+        -- Proc buff absent and deck not full -> Penance was cast
+        -- If a proc buff arrived since last cast, mark the previous slot as proc
+        if procPending and deckCount >= 1 then
+            addon.ui:SetIcon(deckCount, "proc")
+            -- Update history: change last entry from 0 to 1
+            if #history > 0 and history[#history] == 0 then
+                history[#history] = 1
+            end
+        end
+        procPending = false
+
+        -- Draw the next card (increment deck count)
+        deckCount = deckCount + 1
+
+        -- Mark this slot as non-proc (default; proc buff may override on reappearance)
+        addon.ui:SetIcon(deckCount, "noproc")
+        marked[deckCount] = true
+        history[#history + 1] = 0
+        if #history > HISTORY_MAX then table.remove(history, 1) end
+
+        -- Deck complete? Schedule reset after 1 second
+        if deckCount >= 3 then
+            C_Timer.After(1, function()
+                ResetDeck()
+            end)
+        end
+
+        -- Smart detection check (only outside dungeons)
+        if not inDungeon and not historyLocked then
+            CheckSmartDetection()
         end
     end
 end
