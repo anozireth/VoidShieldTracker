@@ -2,8 +2,10 @@
 ## Title: Void Shield Tracker
 ## Notes: Tracks Discipline Priest Void Shift proc deck (3 cards, 1 proc)
 ## Author: anozi
-## Version: 1.0.0
+## Version: 1.0.1
 ## IconTexture: Interface\Icons\Spell_Holy_PowerWordShield
 ## SavedVariables: VSTDB
 
-VoidShieldTracker.lua
+Core.lua
+Deck.lua
+UI.lua
