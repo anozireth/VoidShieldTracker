@@ -1,11 +1,16 @@
 --[[
 Core.lua - Addon core: namespace, event dispatch, initialization.
 Loaded FIRST (top of TOC). Creates the shared addon namespace table
-and the event frame at module load time so RegisterEvent happens
-before any combat lockdown can apply.
+and the event frame at module load time.
 
 Pattern: the addon table is stored in a global (_G[addonName]) so
 Deck.lua and UI.lua can reference the same table via `...`.
+
+IMPORTANT: WoW 12.0 blocks RegisterEvent for combat-related events
+(COMBAT_LOG_EVENT_UNFILTERED, UNIT_AURA, etc.) when called during
+the addon loading phase. We only register ADDON_LOADED and PLAYER_LOGIN
+at load time, then register the rest inside the PLAYER_LOGIN handler
+after the UI is fully initialized.
 ]]
 
 local addonName = ...
@@ -23,22 +28,21 @@ addon.initialized = false
 
 -- ============================================================
 -- Event frame (anonymous - avoids action security issues)
--- Created at module load time, NOT inside PLAYER_LOGIN.
--- Events registered immediately - no combat lockdown possible
--- because this runs during addon load, before any combat.
+-- Only bootstrap events registered here. Combat events are
+-- deferred to PLAYER_LOGIN to avoid WoW 12.0 action security
+-- restrictions on RegisterEvent during addon loading.
 -- ============================================================
 local eventFrame = CreateFrame("Frame")
-local EVENT_LIST = {
-    "ADDON_LOADED",
-    "PLAYER_LOGIN",
+eventFrame:RegisterEvent("ADDON_LOADED")
+eventFrame:RegisterEvent("PLAYER_LOGIN")
+
+-- Events to register AFTER PLAYER_LOGIN fires
+local DEFERRED_EVENTS = {
     "COMBAT_LOG_EVENT_UNFILTERED",
     "UNIT_AURA",
     "GROUP_ROSTER_UPDATE",
     "PLAYER_ENTERING_WORLD",
 }
-for _, e in ipairs(EVENT_LIST) do
-    eventFrame:RegisterEvent(e)
-end
 
 -- ============================================================
 -- Player GUID cache
@@ -57,12 +61,19 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         return
     end
 
+    if event == "PLAYER_LOGIN" then
+        -- Register combat-dependent events NOW, after UI is ready
+        for _, e in ipairs(DEFERRED_EVENTS) do
+            eventFrame:RegisterEvent(e)
+        end
+
+        addon:OnLogin()
+        addon.initialized = true
+        return
+    end
+
     -- Everything below requires the addon to be initialized
     if not addon.initialized then
-        if event == "PLAYER_LOGIN" then
-            addon:OnLogin()
-            addon.initialized = true
-        end
         return
     end
 
