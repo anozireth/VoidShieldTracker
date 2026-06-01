@@ -1,4 +1,4 @@
-|--[[
+--[[
 Deck.lua - Deck tracking logic. Pure state machine.
 Loaded second (after Core.lua). Attaches to addon.deck.
 
@@ -7,10 +7,10 @@ We detect Penance casts via the "Master the Darkness" proc buff
 in UNIT_AURA instead.
 
 Deck state machine:
-  - Proc buff PRESENT  → deckCount = 0, waiting for next Penance
-  - Proc buff ABSENT   → Penance was cast, deckCount = deckCount + 1
-  - Proc buff REAPPEARS → current slot marked as proc
-  - deckCount reaches 3 → reset after 1 second, proc buff reapplies
+  - Proc buff PRESENT  -> deckCount = 0, waiting for next Penance
+  - Proc buff ABSENT   -> Penance was cast, deckCount = deckCount + 1
+  - Proc buff REAPPEARS -> mark current slot as proc
+  - deckCount reaches 3 -> reset after 1 second, proc buff reapplies
 ]]
 
 local addonName = ...
@@ -60,11 +60,11 @@ end
 --
 -- State machine for tracking Penance casts and the proc buff:
 --
---   buff PRESENT at login → deckCount = 0 (waiting for Penance)
---   buff ABSENT at login  → deckCount = 1 (Penance already cast since last reset)
---   buff reappears        → mark current slot as proc, procPending = false
---   buff absent (while deckCount < 3) → Penance cast, increment deck
---   deckCount reaches 3   → reset after 1 second (buff reapplies then)
+--   buff PRESENT at login -> deckCount = 0 (waiting for Penance)
+--   buff ABSENT at login  -> deckCount = 1 (Penance already cast since last reset)
+--   buff reappears        -> mark current slot as proc, procPending = false
+--   buff absent (while deckCount < 3) -> Penance cast, increment deck
+--   deckCount reaches 3   -> reset after 1 second (buff reapplies then)
 -- ============================================================
 function deck:OnPlayerAura()
     local hasBuff = false
@@ -78,18 +78,18 @@ function deck:OnPlayerAura()
     end
 
     if hasBuff then
-        -- Proc buff present → deck is at 0 (waiting for next Penance)
+        -- Proc buff present -> deck is at 0 (waiting for next Penance)
         -- Mark the deck as having a proc pending for the NEXT cast
         procPending = true
 
         -- If deckCount was non-zero, this means the deck already reset
-        -- (buff reapplied after reaching 3) — reset cleanly
+        -- (buff reapplied after reaching 3) -- reset cleanly
         if deckCount > 0 then
             ResetDeck()
         end
 
     elseif deckCount < 3 then
-        -- Proc buff absent and deck not full → Penance was cast
+        -- Proc buff absent and deck not full -> Penance was cast
         -- If a proc buff arrived since last cast, mark the previous slot as proc
         if procPending and deckCount >= 1 then
             addon.ui:SetIcon(deckCount, "proc")
@@ -132,7 +132,7 @@ local function CheckSmartDetection()
 
     local n = #history
 
-    -- Pattern 1: Two procs in a row → boundary between them
+    -- Pattern 1: Two procs in a row -> boundary between them
     for i = 2, n do
         if history[i] == 1 and history[i - 1] == 1 then
             local castsAfterBoundary = n - i
@@ -157,7 +157,7 @@ local function CheckSmartDetection()
         end
     end
 
-    -- Pattern 2: Four non-procs in a row → boundary after the 2nd
+    -- Pattern 2: Four non-procs in a row -> boundary after the 2nd
     for i = 4, n do
         if history[i] == 0 and history[i-1] == 0 and
            history[i-2] == 0 and history[i-3] == 0 then
