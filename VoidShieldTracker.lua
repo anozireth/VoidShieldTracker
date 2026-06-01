@@ -197,10 +197,10 @@ local function CheckSmartDetection()
                 deckCount = ((deckCount - 1) % 3) + 1
             end
 
-            -- Rebuild marked array for current deck
+            -- Rebuild icons: position 1 = boundary proc at index i
             for j = 1, 3 do marked[j] = false end
             for j = 1, deckCount do
-                local histIdx = i + j
+                local histIdx = i + j - 1
                 if histIdx <= n then
                     SetIcon(j, history[histIdx] == 1 and "proc" or "noproc")
                     marked[j] = true
