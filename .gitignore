@@ -1,0 +1,4 @@
+*.toc.bak
+*.lua.bak
+__pycache__/
+*.cache
