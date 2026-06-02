@@ -496,6 +496,17 @@ function deck:GetDisplayState()
                 if r == RESULT_PROC then procFound = true end
             end
         end
+
+        -- One proc per deck: once it's known, any "unknown" cast in this block
+        -- (shield was already up, so a new proc couldn't be seen) must be a
+        -- no-proc. Resolve those question marks to the no-proc face.
+        if procFound then
+            for slot = 1, 3 do
+                if cards[slot] == RESULT_UNKNOWN then
+                    cards[slot] = RESULT_NOPROC
+                end
+            end
+        end
     end
 
     -- Slot the next cast will fill. If the block is complete, the next cast
