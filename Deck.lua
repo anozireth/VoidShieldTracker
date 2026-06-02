@@ -154,6 +154,48 @@ end
 --   deckCount reaches 3   -> reset after 1 second (buff reapplies then)
 -- ============================================================
 function deck:OnPlayerAura()
+    -- Check for PENCE cast via cast bar (PENCE is a channel)
+    local castInfo = C_CastInfo and C_CastInfo.GetCastBarInfoByUnit("player")
+    if castInfo and castInfo.spellID == PROC_BUFF_ID then
+        DEFAULT_CHAT_FRAME:AddMessage(string.format(
+            "%s PENCE cast detected via cast bar (channel=%.3fs)", DBG, castInfo.elapsed or 0))
+        -- PENCE started: increment deck count
+        local now = GetGameTime()
+        local debounceGap = now - lastCastTime
+        if debounceGap < CAST_DEBOUNCE then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format(
+                "%s   DEBOUNCE SKIP (%.3f < %.3f)", DBG, debounceGap, CAST_DEBOUNCE))
+            return
+        end
+        lastCastTime = now
+
+        deckCount = deckCount + 1
+        addon.SafeSetIcon(addon.ui, deckCount, "noproc")
+        marked[deckCount] = true
+        history[#history + 1] = 0
+        if #history > HISTORY_MAX then table.remove(history, 1) end
+
+        DEFAULT_CHAT_FRAME:AddMessage(string.format(
+            "%s   deckCount=%d/3 history=[%s]",
+            DBG, deckCount, table.concat(history, ",")))
+
+        if deckCount >= 3 then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format(
+                "%s   DECK FULL (3) — scheduling 1s reset", DBG))
+            C_Timer.After(1, function()
+                DEFAULT_CHAT_FRAME:AddMessage(string.format(
+                    "%s   RESET TIMER FIRED", DBG))
+                ResetDeck()
+            end)
+        end
+
+        if not inDungeon and not historyLocked then
+            CheckSmartDetection()
+        end
+        return
+    end
+
+    -- Also check proc buff state for reset detection
     local hasBuff = false
     local buffAura = nil
 
@@ -190,76 +232,7 @@ function deck:OnPlayerAura()
             "%s   ^^^ PROC BUFF MATCH: name=%s spellID=%d", DBG, buffAura.name, buffAura.spellID))
     end
 
-    -- First event after login: just set state, don't act on it
-    if prevState == nil then
-        DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            "%s FIRST EVENT: buff=%s deck=%d", DBG, tostring(hasBuff), deckCount))
-        if not hasBuff then
-            deckCount = 1
-            if deckCount >= 1 then
-                addon.SafeSetIcon(addon.ui, deckCount, "proc")
-                history[#history + 1] = 1
-                if #history > HISTORY_MAX then table.remove(history, 1) end
-                marked[1] = true
-            end
-            DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                "%s init: buff absent => deckCount=1", DBG))
-        end
-        return
-    end
-
-    -- State transition: buff went from present to absent => Penance cast
-    if prevState and not hasBuff then
-          local now = GetGameTime()
-          local debounceGap = now - lastCastTime
-          DEFAULT_CHAT_FRAME:AddMessage(string.format(
-              "%s TRANSITION: present->absent (PENCE cast?) time=%.3f debounceGap=%.3f",
-              DBG, now, debounceGap))
-          if debounceGap < CAST_DEBOUNCE then
-              DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                  "%s   DEBOUNCE SKIP (%.3f < %.3f)", DBG, debounceGap, CAST_DEBOUNCE))
-              return
-          end
-          lastCastTime = now
-
-        DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            "%s   procPending=%s deckCount=%d", DBG, tostring(procPending), deckCount))
-        if procPending and deckCount >= 1 then
-            addon.SafeSetIcon(addon.ui, deckCount, "proc")
-            if #history > 0 and history[#history] == 0 then
-                history[#history] = 1
-            end
-            DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                "%s   marked slot %d as PROC", DBG, deckCount))
-        end
-        procPending = false
-
-        deckCount = deckCount + 1
-        addon.SafeSetIcon(addon.ui, deckCount, "noproc")
-        marked[deckCount] = true
-        history[#history + 1] = 0
-        if #history > HISTORY_MAX then table.remove(history, 1) end
-
-        DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            "%s   deckCount=%d/3 history=[%s]",
-            DBG, deckCount, table.concat(history, ",")))
-
-        if deckCount >= 3 then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                "%s   DECK FULL (3) — scheduling 1s reset", DBG))
-            C_Timer.After(1, function()
-                DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                    "%s   RESET TIMER FIRED", DBG))
-                ResetDeck()
-            end)
-        end
-
-        if not inDungeon and not historyLocked then
-            CheckSmartDetection()
-        end
-    end
-
-    -- State transition: buff went from absent to present => deck reset
+    -- Buff reapplied after reset
     if not prevState and hasBuff then
         DEFAULT_CHAT_FRAME:AddMessage(string.format(
             "%s TRANSITION: absent->present (RESET) deckCount=%d",
