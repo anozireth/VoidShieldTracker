@@ -148,7 +148,11 @@ function deck:OnPlayerAura()
 
     -- Print all helpful auras for debugging
     local auraList = ""
-    local playerAuras = C_UnitAuras.GetAuras("player", "HELPFUL")
+    local playerAuras = nil
+    local ok, result = pcall(C_UnitAuras.GetUnitAuras, "player", "HELPFUL")
+    if ok and result then
+        playerAuras = result
+    end
     if playerAuras then
         for i = 1, #playerAuras do
             local aura = playerAuras[i]
