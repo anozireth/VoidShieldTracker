@@ -36,7 +36,7 @@ local EVENT_LIST = {
 local eventHandlers = {}
 
 -- ============================================================
--- Taint-safe icon helpers (methods on addon — shared across modules)
+-- Taint-safe icon helpers (methods on addon - shared across modules)
 -- ============================================================
 addon.SafeTableIndex = function(t, key)
     local ok, v = pcall(function() return t[key] end)

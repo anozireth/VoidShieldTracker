@@ -7,7 +7,7 @@
     Spell ID chain (per SimulationCraft / SpellData):
       47540  base driver cast on enemy (fires CHANNEL_START for offensive)
       47758  damage channel triggered by 47540
-      47666  per-bolt tick — damage or healing (fires UNIT_SPELLCAST_SUCCEEDED)
+      47666  per-bolt tick - damage or healing (fires UNIT_SPELLCAST_SUCCEEDED)
       47757  healing channel cast on friendly (fires CHANNEL_START for healing)
       47750  per-bolt healing tick (fires UNIT_SPELLCAST_SUCCEEDED)
     All IDs are matched so any variant that surfaces on CHANNEL_START is caught.
@@ -265,7 +265,7 @@ function deck:OnPenanceChannel(spellID, spellName)
 
         if deckCount >= 3 then
             DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                "%s   DECK FULL (3) — scheduling 1s reset", DBG))
+                "%s   DECK FULL (3) - scheduling 1s reset", DBG))
             C_Timer.After(1, function()
                 DEFAULT_CHAT_FRAME:AddMessage(string.format(
                     "%s   RESET TIMER FIRED", DBG))
