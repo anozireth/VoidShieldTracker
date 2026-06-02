@@ -74,6 +74,9 @@ function deck:Initialize()
     historyLocked = false
     for i = 1, 3 do marked[i] = false end
     addon.SafeSetAllIcons(addon.ui, "empty")
+    DEFAULT_CHAT_FRAME:AddMessage(string.format(
+        "%s INIT complete: deckCount=%d ui=%s ui.icons=%s",
+        DBG, deckCount, tostring(addon.ui), tostring(addon.ui and addon.ui.icons)))
 end
 
 -- ============================================================
@@ -152,13 +155,19 @@ end
 -- Penance channel detection (called from UNIT_SPELLCAST_CHANNEL_START)
 -- ============================================================
 function deck:OnPenanceChannel(spellID, spellName)
-    if not PENANCE_SPELL_IDS[spellID] then
-        return
-    end
-
     DEFAULT_CHAT_FRAME:AddMessage(string.format(
         "%s PENCE CHANNEL_START: spellID=%d name=%s",
         DBG, spellID, spellName or "(none)"))
+    DEFAULT_CHAT_FRAME:AddMessage(string.format(
+        "%s   ui=%s icons=%s", DBG, tostring(addon.ui), tostring(addon.ui and addon.ui.icons)))
+
+    if not PENANCE_SPELL_IDS[spellID] then
+        DEFAULT_CHAT_FRAME:AddMessage(string.format(
+            "%s   SPELL NOT MATCHED", DBG))
+        return
+    end
+    DEFAULT_CHAT_FRAME:AddMessage(string.format(
+        "%s   SPELL MATCHED", DBG))
 
     local now = GetGameTime()
     local debounceGap = now - lastCastTime
@@ -170,7 +179,11 @@ function deck:OnPenanceChannel(spellID, spellName)
     lastCastTime = now
 
     deckCount = deckCount + 1
+    DEFAULT_CHAT_FRAME:AddMessage(string.format(
+        "%s   Setting icon slot %d to noproc", DBG, deckCount))
     addon.SafeSetIcon(addon.ui, deckCount, "noproc")
+    DEFAULT_CHAT_FRAME:AddMessage(string.format(
+        "%s   icon set complete. deckCount=%d", DBG, deckCount))
     marked[deckCount] = true
     history[#history + 1] = 0
     if #history > HISTORY_MAX then table.remove(history, 1) end
