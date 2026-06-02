@@ -147,23 +147,29 @@ function deck:OnPlayerAura()
     local buffAura = nil
 
     -- Print all helpful auras for debugging
-     local auraList = ""
-     AuraUtil.ForEachAura("player", "HELPFUL", nil, function(aura)
-         if aura.name == PROC_BUFF_NAME or aura.spellID == PROC_BUFF_ID then
-             hasBuff = true
-             buffAura = aura
-         end
-         local name = aura.name or "(no name)"
-         if auraList ~= "" then auraList = auraList .. ", " end
-         auraList = auraList .. string.format("[%d] %s", aura.spellID or 0, name)
-     end)
+    local auraList = ""
+    local playerAuras = C_UnitAuras.GetAuras("player", "HELPFUL")
+    if playerAuras then
+        for i = 1, #playerAuras do
+            local aura = playerAuras[i]
+            if aura.spellID == PROC_BUFF_ID or aura.name == PROC_BUFF_NAME then
+                hasBuff = true
+                buffAura = aura
+            end
+            local name = aura.name or "(no name)"
+            local sid = aura.spellID or 0
+            if auraList ~= "" then auraList = auraList .. ", " end
+            auraList = auraList .. string.format("[%d] %s", sid, name)
+        end
+    end
 
     local prevState = lastBuffPresent
     lastBuffPresent = hasBuff
 
     DEFAULT_CHAT_FRAME:AddMessage(string.format(
-        "%s AURA evt: hasBuff=%s prev=%s deck=%d procPend=%s auras=[%s]",
-        DBG, tostring(hasBuff), tostring(prevState), deckCount, tostring(procPending), auraList))
+        "%s AURA evt: hasBuff=%s prev=%s deck=%d procPend=%s totalAuras=%d auras=[%s]",
+        DBG, tostring(hasBuff), tostring(prevState), deckCount, tostring(procPending),
+        playerAuras and #playerAuras or 0, auraList))
     if buffAura then
         DEFAULT_CHAT_FRAME:AddMessage(string.format(
             "%s   ^^^ PROC BUFF MATCH: name=%s spellID=%d", DBG, buffAura.name, buffAura.spellID))
