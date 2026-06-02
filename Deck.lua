@@ -20,6 +20,9 @@ addon.deck = deck
 
 -- Spell IDs / names
 local PROC_BUFF_NAME = "Master the Darkness"
+local PROC_BUFF_ID = 47540
+
+local DBG = "|cffffaa00[VST-DBG]|r"
 
 -- Deck state
 local deckCount
@@ -141,19 +144,29 @@ end
 -- ============================================================
 function deck:OnPlayerAura()
     local hasBuff = false
+    local buffAura = nil
     AuraUtil.ForEachAura("player", "HELPFUL", nil, function(aura)
         if aura.name == PROC_BUFF_NAME then
             hasBuff = true
+            buffAura = aura
         end
     end)
 
-    -- Only act when the buff's presence CHANGED since the last event
     local prevState = lastBuffPresent
     lastBuffPresent = hasBuff
 
+    DEFAULT_CHAT_FRAME:AddMessage(string.format(
+        "%s AURA evt: hasBuff=%s prev=%s deck=%d procPend=%s",
+        DBG, tostring(hasBuff), tostring(prevState), deckCount, tostring(procPending)))
+    if buffAura then
+        DEFAULT_CHAT_FRAME:AddMessage(string.format(
+            "%s   buff aura: name=%s spellID=%s", DBG, buffAura.name, tostring(buffAura.applications)))
+    end
+
     -- First event after login: just set state, don't act on it
     if prevState == nil then
-        -- If buff absent at first check, assume a cast already happened
+        DEFAULT_CHAT_FRAME:AddMessage(string.format(
+            "%s FIRST EVENT: buff=%s deck=%d", DBG, tostring(hasBuff), deckCount))
         if not hasBuff then
             deckCount = 1
             if deckCount >= 1 then
@@ -162,6 +175,8 @@ function deck:OnPlayerAura()
                 if #history > HISTORY_MAX then table.remove(history, 1) end
                 marked[1] = true
             end
+            DEFAULT_CHAT_FRAME:AddMessage(string.format(
+                "%s init: buff absent => deckCount=1", DBG))
         end
         return
     end
@@ -169,16 +184,26 @@ function deck:OnPlayerAura()
     -- State transition: buff went from present to absent => Penance cast
     if prevState and not hasBuff then
         local now = GetTime()
-        if now - lastCastTime < CAST_DEBOUNCE then
+        local debounceGap = now - lastCastTime
+        DEFAULT_CHAT_FRAME:AddMessage(string.format(
+            "%s TRANSITION: present->absent (PENCE cast?) time=%s debounceGap=%.3f",
+            DBG, tostring(now), debounceGap))
+        if debounceGap < CAST_DEBOUNCE then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format(
+                "%s   DEBOUNCE SKIP (%.3f < %.3f)", DBG, debounceGap, CAST_DEBOUNCE))
             return
         end
         lastCastTime = now
 
+        DEFAULT_CHAT_FRAME:AddMessage(string.format(
+            "%s   procPending=%s deckCount=%d", DBG, tostring(procPending), deckCount))
         if procPending and deckCount >= 1 then
             addon.SafeSetIcon(addon.ui, deckCount, "proc")
             if #history > 0 and history[#history] == 0 then
                 history[#history] = 1
             end
+            DEFAULT_CHAT_FRAME:AddMessage(string.format(
+                "%s   marked slot %d as PROC", DBG, deckCount))
         end
         procPending = false
 
@@ -188,8 +213,16 @@ function deck:OnPlayerAura()
         history[#history + 1] = 0
         if #history > HISTORY_MAX then table.remove(history, 1) end
 
+        DEFAULT_CHAT_FRAME:AddMessage(string.format(
+            "%s   deckCount=%d/3 history=[%s]",
+            DBG, deckCount, table.concat(history, ",")))
+
         if deckCount >= 3 then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format(
+                "%s   DECK FULL (3) — scheduling 1s reset", DBG))
             C_Timer.After(1, function()
+                DEFAULT_CHAT_FRAME:AddMessage(string.format(
+                    "%s   RESET TIMER FIRED", DBG))
                 ResetDeck()
             end)
         end
@@ -201,10 +234,14 @@ function deck:OnPlayerAura()
 
     -- State transition: buff went from absent to present => deck reset
     if not prevState and hasBuff then
-        -- Deck already at 0 from reset timer; clear proc pending
+        DEFAULT_CHAT_FRAME:AddMessage(string.format(
+            "%s TRANSITION: absent->present (RESET) deckCount=%d",
+            DBG, deckCount))
         procPending = true
         if deckCount > 0 then
             ResetDeck()
+            DEFAULT_CHAT_FRAME:AddMessage(string.format(
+                "%s   reset deck to 0", DBG))
         end
     end
 end
