@@ -33,6 +33,44 @@ local EVENT_LIST = {
     "PLAYER_ENTERING_WORLD",
 }
 local eventHandlers = {}
+
+-- ============================================================
+-- Taint-safe icon helpers (shared across modules)
+-- ============================================================
+local TX_PROC    = "Interface\\Icons\\Inv12_apextalent_priest_voidshield"
+local TX_NOPROC  = "Interface\\Icons\\spell_holy_penance"
+local TX_EMPTY   = "Interface\\Buttons\\UI-EmptySlot"
+
+local function SafeTableIndex(t, key)
+    local ok, v = pcall(function() return t[key] end)
+    return ok and v
+end
+
+local function SafeSetIcon(ui, slot, state)
+    if not ui then return end
+    local icons = SafeTableIndex(ui, "icons")
+    if not icons or not icons[slot] then return end
+    local tex = SafeTableIndex(icons[slot], "texture")
+    if not tex then return end
+
+    if state == "empty" then
+        tex:SetTexture(TX_EMPTY)
+        tex:SetVertexColor(0.3, 0.3, 0.3, 0.5)
+    elseif state == "proc" then
+        tex:SetTexture(TX_PROC)
+        tex:SetVertexColor(0.4, 0.9, 0.4, 1)
+    elseif state == "noproc" then
+        tex:SetTexture(TX_NOPROC)
+        tex:SetVertexColor(0.9, 0.2, 0.2, 1)
+    end
+end
+
+local function SafeSetAllIcons(ui, state)
+    for i = 1, 3 do
+        SafeSetIcon(ui, i, state)
+    end
+end
+
 eventHandlers["ADDON_LOADED"] = function(self, event, loadedName)
     if loadedName == addonName then
         playerGUID = nil
