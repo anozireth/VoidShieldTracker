@@ -20,7 +20,7 @@ addon.deck = deck
 
 -- Spell IDs / names
 local PROC_BUFF_NAME = "Master the Darkness"
-local PROC_BUFF_ID = 47540
+local PROC_BUFF_ID = 1253591
 
 local DBG = "|cffffaa00[VST-DBG]|r"
 
@@ -144,13 +144,13 @@ end
 -- ============================================================
 function deck:OnPlayerAura()
     local hasBuff = false
-    local buffAura = nil
-    AuraUtil.ForEachAura("player", "HELPFUL", nil, function(aura)
-        if aura.name == PROC_BUFF_NAME then
-            hasBuff = true
-            buffAura = aura
-        end
-    end)
+     local buffAura = nil
+     AuraUtil.ForEachAura("player", "HELPFUL", nil, function(aura)
+         if aura.name == PROC_BUFF_NAME or aura.spellID == PROC_BUFF_ID then
+             hasBuff = true
+             buffAura = aura
+         end
+     end)
 
     local prevState = lastBuffPresent
     lastBuffPresent = hasBuff
@@ -159,9 +159,9 @@ function deck:OnPlayerAura()
         "%s AURA evt: hasBuff=%s prev=%s deck=%d procPend=%s",
         DBG, tostring(hasBuff), tostring(prevState), deckCount, tostring(procPending)))
     if buffAura then
-        DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            "%s   buff aura: name=%s spellID=%s", DBG, buffAura.name, tostring(buffAura.applications)))
-    end
+          DEFAULT_CHAT_FRAME:AddMessage(string.format(
+              "%s   buff aura: name=%s spellID=%d", DBG, buffAura.name, buffAura.spellID))
+      end
 
     -- First event after login: just set state, don't act on it
     if prevState == nil then
