@@ -1,6 +1,6 @@
 ## Interface: 120005
 ## Title: Void Shield Tracker
-## Notes: Tracks Discipline Priest Void Shift proc deck (3 cards, 1 proc)
+## Notes: Tracks Discipline Priest Void Shield proc deck (3 cards, 1 proc)
 ## Author: anozi
 ## Version: 1.0.1
 ## IconTexture: Interface\Icons\Spell_Holy_PowerWordShield
