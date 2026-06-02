@@ -101,4 +101,4 @@ card-based deck visualization.
 
 ## License
 
-See [LICENSE](LICENSE) if present, otherwise all rights reserved by the author.
+[MIT](LICENSE) © anozireth
