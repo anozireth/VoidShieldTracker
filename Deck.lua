@@ -69,7 +69,7 @@ local PROC_CHECK_DELAY_DEFAULT_MS = 200
 
 -- Once a deck (3 casts) completes, blank the display this long after the
 -- completing cast so the board shows fresh face-down cards for the next deck.
-local DECK_CLEAR_DELAY = 1.0
+local DECK_CLEAR_DELAY = 2.0
 
 -- Result values fed to the predictor.
 local RESULT_PROC    = "proc"
