@@ -33,9 +33,8 @@ local EVENT_LIST = {
     "PLAYER_ENTERING_WORLD",
 }
 local eventHandlers = {}
-eventHandlers["ADDON_LOADED"] = function()
-    local name = ...
-    if name == addonName then
+eventHandlers["ADDON_LOADED"] = function(self, event, loadedName)
+    if loadedName == addonName then
         playerGUID = nil
     end
 end

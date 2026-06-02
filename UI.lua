@@ -3,8 +3,7 @@ UI.lua - Frame creation, icon management, minimap button, slash commands.
 Loaded third (after Core.lua and Deck.lua). Attaches to addon.ui.
 ]]
 
-local addonName = ...
-local addon = _G[addonName]
+local addon = _G["VoidShieldTracker"]
 
 local ui = {}
 addon.ui = ui

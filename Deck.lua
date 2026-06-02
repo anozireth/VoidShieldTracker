@@ -13,8 +13,7 @@ Deck state machine:
   - deckCount reaches 3 -> reset after 1 second, proc buff reapplies
 ]]
 
-local addonName = ...
-local addon = _G[addonName]
+local addon = _G["VoidShieldTracker"]
 
 local deck = {}
 addon.deck = deck
