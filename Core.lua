@@ -32,51 +32,41 @@ local EVENT_LIST = {
     "GROUP_ROSTER_UPDATE",
     "PLAYER_ENTERING_WORLD",
 }
+local eventHandlers = {}
+eventHandlers["ADDON_LOADED"] = function()
+    local name = ...
+    if name == addonName then
+        playerGUID = nil
+    end
+end
+eventHandlers["PLAYER_LOGIN"] = function()
+    addon:OnLogin()
+    addon.initialized = true
+end
+eventHandlers["GROUP_ROSTER_UPDATE"] = function()
+    if addon.initialized then
+        addon.deck:CheckDungeonState()
+    end
+end
+eventHandlers["PLAYER_ENTERING_WORLD"] = function()
+    if addon.initialized then
+        addon.deck:OnEnterWorld()
+    end
+end
+eventHandlers["UNIT_AURA"] = function(unit)
+    if addon.initialized and unit == "player" then
+        addon.deck:OnPlayerAura()
+    end
+end
 
-for _, e in ipairs(EVENT_LIST) do
+local eventFrame = CreateFrame("Frame")
+for e, _ in pairs(eventHandlers) do
     eventFrame:RegisterEvent(e)
 end
 
--- ============================================================
--- Player GUID cache
--- ============================================================
-local playerGUID
-
--- ============================================================
--- Event dispatch
--- ============================================================
 eventFrame:SetScript("OnEvent", function(self, event, ...)
-    if event == "ADDON_LOADED" then
-        local name = select(1, ...)
-        if name == addonName then
-            playerGUID = nil
-        end
-        return
-    end
-
-    if event == "PLAYER_LOGIN" then
-        addon:OnLogin()
-        addon.initialized = true
-        return
-    end
-
-    -- Everything below requires the addon to be initialized
-    if not addon.initialized then
-        return
-    end
-
-    if event == "UNIT_AURA" then
-        local unit = select(1, ...)
-        if unit == "player" then
-            addon.deck:OnPlayerAura()
-        end
-
-    elseif event == "GROUP_ROSTER_UPDATE" then
-        addon.deck:CheckDungeonState()
-
-    elseif event == "PLAYER_ENTERING_WORLD" then
-        addon.deck:OnEnterWorld()
-    end
+    local h = eventHandlers[event]
+    if h then h(...) end
 end)
 
 -- ============================================================

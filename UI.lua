@@ -17,6 +17,40 @@ local TX_NOPROC  = "Interface\\Icons\\spell_holy_penance"
 local TX_EMPTY   = "Interface\\Buttons\\UI-EmptySlot"
 
 -- ============================================================
+-- Taint safety helpers (WoW 12.0 pattern from BliZzi_Interrupts)
+-- Wrap table indexing in pcall to handle tainted keys
+-- ============================================================
+local function SafeTableIndex(t, key)
+    local ok, v = pcall(function() return t[key] end)
+    return ok and v
+end
+
+local function SafeSetIcon(ui, slot, state)
+    if not ui then return end
+    local icons = SafeTableIndex(ui, "icons")
+    if not icons or not icons[slot] then return end
+    local tex = SafeTableIndex(icons[slot], "texture")
+    if not tex then return end
+
+    if state == "empty" then
+        tex:SetTexture(TX_EMPTY)
+        tex:SetVertexColor(0.3, 0.3, 0.3, 0.5)
+    elseif state == "proc" then
+        tex:SetTexture(TX_PROC)
+        tex:SetVertexColor(0.4, 0.9, 0.4, 1)
+    elseif state == "noproc" then
+        tex:SetTexture(TX_NOPROC)
+        tex:SetVertexColor(0.9, 0.2, 0.2, 1)
+    end
+end
+
+local function SafeSetAllIcons(ui, state)
+    for i = 1, 3 do
+        SafeSetIcon(ui, i, state)
+    end
+end
+
+-- ============================================================
 -- Icon update
 -- ============================================================
 ui.icons = {}
@@ -47,8 +81,8 @@ end
 -- Frame creation
 -- ============================================================
 function ui:Create()
-    -- Main tracker frame (unnamed - avoids action security issues)
-    local frame = CreateFrame("Frame", nil, UIParent)
+    -- Main tracker frame (BackdropTemplate for native backdrop support)
+    local frame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
     frame:SetWidth(200)
     frame:SetHeight(64)
     frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
@@ -64,16 +98,14 @@ function ui:Create()
     end)
     frame:SetFrameStrata("MEDIUM")
     frame:SetFrameLevel(5)
-
-    -- Background
-    local bg = frame:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints(frame)
-    bg:SetTexture(0, 0, 0, 0.75)
-
-    -- Border
-    local border = frame:CreateTexture(nil, "BORDER")
-    border:SetAllPoints(frame)
-    border:SetTexture(0.4, 0.4, 0.5, 1)
+    frame:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    frame:SetBackdropColor(0, 0, 0, 0.75)
+    frame:SetBackdropBorderColor(0.4, 0.4, 0.5, 1)
 
     -- Title
     local title = frame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")

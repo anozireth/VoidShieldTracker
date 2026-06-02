@@ -46,12 +46,14 @@ local CAST_DEBOUNCE = 0.5
 function deck:Initialize()
     deckCount = 0
     procPending = false
+    lastBuffPresent = nil
+    lastCastTime = 0
     marked = {}
     inDungeon = false
     history = {}
     historyLocked = false
     for i = 1, 3 do marked[i] = false end
-    addon.ui:SetAllIcons("empty")
+    SafeSetAllIcons(addon.ui, "empty")
 end
 
 -- ============================================================
@@ -62,7 +64,7 @@ local function ResetDeck()
     procPending = false
     lastCastTime = 0
     for i = 1, 3 do marked[i] = false end
-    addon.ui:SetAllIcons("empty")
+    SafeSetAllIcons(addon.ui, "empty")
 end
 
 -- ============================================================
@@ -87,7 +89,7 @@ local function CheckSmartDetection()
             for j = 1, deckCount do
                 local histIdx = i + j - 1
                 if histIdx <= n then
-                    addon.ui:SetIcon(j, history[histIdx] == 1 and "proc" or "noproc")
+                    SafeSetIcon(addon.ui, j, history[histIdx] == 1 and "proc" or "noproc")
                     marked[j] = true
                 end
             end
@@ -114,7 +116,7 @@ local function CheckSmartDetection()
             for j = 1, deckCount do
                 local histIdx = boundaryPos + j - 1
                 if histIdx <= n then
-                    addon.ui:SetIcon(j, history[histIdx] == 1 and "proc" or "noproc")
+                    SafeSetIcon(addon.ui, j, history[histIdx] == 1 and "proc" or "noproc")
                     marked[j] = true
                 end
             end
@@ -156,7 +158,7 @@ function deck:OnPlayerAura()
         if not hasBuff then
             deckCount = 1
             if deckCount >= 1 then
-                addon.ui:SetIcon(deckCount, "proc")
+                SafeSetIcon(addon.ui, deckCount, "proc")
                 history[#history + 1] = 1
                 if #history > HISTORY_MAX then table.remove(history, 1) end
                 marked[1] = true
@@ -174,7 +176,7 @@ function deck:OnPlayerAura()
         lastCastTime = now
 
         if procPending and deckCount >= 1 then
-            addon.ui:SetIcon(deckCount, "proc")
+            SafeSetIcon(addon.ui, deckCount, "proc")
             if #history > 0 and history[#history] == 0 then
                 history[#history] = 1
             end
@@ -182,7 +184,7 @@ function deck:OnPlayerAura()
         procPending = false
 
         deckCount = deckCount + 1
-        addon.ui:SetIcon(deckCount, "noproc")
+        SafeSetIcon(addon.ui, deckCount, "noproc")
         marked[deckCount] = true
         history[#history + 1] = 0
         if #history > HISTORY_MAX then table.remove(history, 1) end
