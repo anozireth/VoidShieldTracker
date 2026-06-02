@@ -144,24 +144,29 @@ end
 -- ============================================================
 function deck:OnPlayerAura()
     local hasBuff = false
-     local buffAura = nil
-     AuraUtil.ForEachAura("player", "HELPFUL", nil, function(aura)
-         if aura.name == PROC_BUFF_NAME or aura.spellID == PROC_BUFF_ID then
-             hasBuff = true
-             buffAura = aura
-         end
-     end)
+    local buffAura = nil
+
+    -- Print all helpful auras for debugging
+    local auraList = ""
+    AuraUtil.ForEachAura("player", "HELPFUL", nil, function(aura)
+        if aura.name == PROC_BUFF_NAME or aura.spellID == PROC_BUFF_ID then
+            hasBuff = true
+            buffAura = aura
+        end
+        if auraList ~= "" then auraList = auraList .. ", " end
+        auraList = auraList .. string.format("[%d] %s", aura.spellID, aura.name)
+    end)
 
     local prevState = lastBuffPresent
     lastBuffPresent = hasBuff
 
     DEFAULT_CHAT_FRAME:AddMessage(string.format(
-        "%s AURA evt: hasBuff=%s prev=%s deck=%d procPend=%s",
-        DBG, tostring(hasBuff), tostring(prevState), deckCount, tostring(procPending)))
+        "%s AURA evt: hasBuff=%s prev=%s deck=%d procPend=%s auras=[%s]",
+        DBG, tostring(hasBuff), tostring(prevState), deckCount, tostring(procPending), auraList))
     if buffAura then
-          DEFAULT_CHAT_FRAME:AddMessage(string.format(
-              "%s   buff aura: name=%s spellID=%d", DBG, buffAura.name, buffAura.spellID))
-      end
+        DEFAULT_CHAT_FRAME:AddMessage(string.format(
+            "%s   ^^^ PROC BUFF MATCH: name=%s spellID=%d", DBG, buffAura.name, buffAura.spellID))
+    end
 
     -- First event after login: just set state, don't act on it
     if prevState == nil then
