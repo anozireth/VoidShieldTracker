@@ -1,54 +1,62 @@
---[[
-Deck.lua - Deck tracking logic. Pure state machine.
-Loaded second (after Core.lua). Attaches to addon.deck.
+--[=[
+    Deck.lua - Deck tracking logic for Discipline Priest Void Shield.
 
-WoW 12.0: COMBAT_LOG_EVENT_UNFILTERED is forbidden for addons.
-We detect Penance casts via the "Master the Darkness" proc buff
-in UNIT_AURA instead.
+    Detection: UNIT_SPELLCAST_CHANNEL_START with Penance spell IDs.
+    Reset: proc buff reapplies after 3 casts (detected via UNIT_AURA).
 
-Deck state machine:
-  - Proc buff PRESENT  -> deckCount = 0, waiting for next Penance
-  - Proc buff ABSENT   -> Penance was cast, deckCount = deckCount + 1
-  - Proc buff REAPPEARS -> mark current slot as proc
-  - deckCount reaches 3 -> reset after 1 second, proc buff reapplies
-]]
+    Spell ID chain (per SimulationCraft / SpellData):
+      47540  base driver cast on enemy (fires CHANNEL_START for offensive)
+      47758  damage channel triggered by 47540
+      47666  per-bolt tick — damage or healing (fires UNIT_SPELLCAST_SUCCEEDED)
+      47757  healing channel cast on friendly (fires CHANNEL_START for healing)
+      47750  per-bolt healing tick (fires UNIT_SPELLCAST_SUCCEEDED)
+    All IDs are matched so any variant that surfaces on CHANNEL_START is caught.
+]=]
 
 local addon = _G["VoidShieldTracker"]
 
 local deck = {}
 addon.deck = deck
 
--- Spell IDs / names
+-- ============================================================
+-- Penance spell IDs to match on UNIT_SPELLCAST_CHANNEL_START
+-- ============================================================
+local PENANCE_SPELL_IDS = {
+    [47540] = true,  -- Penance base driver (enemy / offensive)
+    [47758] = true,  -- Penance damage channel
+    [47666] = true,  -- Penance per-bolt tick
+    [47757] = true,  -- Penance healing channel (friendly)
+    [47750] = true,  -- Penance per-bolt healing tick
+}
+
+-- ============================================================
+-- Proc buff detection (for deck reset detection)
+-- ============================================================
 local PROC_BUFF_NAME = "Master the Darkness"
 local PROC_BUFF_ID = 1253591
-local PENCE_SPELL_ID = 47540
 
 local DBG = "|cffffaa00[VST-DBG]|r"
 
+-- ============================================================
 -- Deck state
+-- ============================================================
 local deckCount
-local procPending
-local marked = {}
 local inDungeon
 local history = {}
 local HISTORY_MAX = 20
 local historyLocked
 
 -- Track whether the proc buff was present on the PREVIOUS aura event.
--- This lets us detect state changes (present->absent = cast, absent->present = reset)
--- and ignore UNIT_AURA events from unrelated auras.
 local lastBuffPresent = nil
 
--- Debounce: ignore rapid "buff absent" events from multi-bolt casts
+-- Debounce: ignore rapid CHANNEL_START events from multi-bolt casts
 local lastCastTime = 0
 local CAST_DEBOUNCE = 0.5
 
 local function GetGameTime()
-    -- In WoW 12.0, GetTime() may return Unix epoch. Use game seconds instead.
     local t = GetTime()
     if t and t > 1000000 then
-        -- Looks like Unix epoch; convert to game time
-        local gameStart = 1717200000  -- approximate login epoch
+        local gameStart = 1717200000
         return t - gameStart
     end
     return t
@@ -59,14 +67,12 @@ end
 -- ============================================================
 function deck:Initialize()
     deckCount = 0
-    procPending = false
     lastBuffPresent = nil
     lastCastTime = 0
-    marked = {}
     inDungeon = false
     history = {}
     historyLocked = false
-    for i = 1, 3 do marked[i] = false end
+    for i = 1, 3 do deck.marked[i] = false end
     addon.SafeSetAllIcons(addon.ui, "empty")
 end
 
@@ -75,9 +81,8 @@ end
 -- ============================================================
 local function ResetDeck()
     deckCount = 0
-    procPending = false
     lastCastTime = 0
-    for i = 1, 3 do marked[i] = false end
+    for i = 1, 3 do deck.marked[i] = false end
     addon.SafeSetAllIcons(addon.ui, "empty")
 end
 
@@ -99,12 +104,12 @@ local function CheckSmartDetection()
                 deckCount = ((deckCount - 1) % 3) + 1
             end
 
-            for j = 1, 3 do marked[j] = false end
+            for j = 1, 3 do deck.marked[j] = false end
             for j = 1, deckCount do
                 local histIdx = i + j - 1
                 if histIdx <= n then
                     addon.SafeSetIcon(addon.ui, j, history[histIdx] == 1 and "proc" or "noproc")
-                    marked[j] = true
+                    deck.marked[j] = true
                 end
             end
             historyLocked = true
@@ -126,12 +131,12 @@ local function CheckSmartDetection()
                 deckCount = ((deckCount - 1) % 3) + 1
             end
 
-            for j = 1, 3 do marked[j] = false end
+            for j = 1, 3 do deck.marked[j] = false end
             for j = 1, deckCount do
                 local histIdx = boundaryPos + j - 1
                 if histIdx <= n then
                     addon.SafeSetIcon(addon.ui, j, history[histIdx] == 1 and "proc" or "noproc")
-                    marked[j] = true
+                    deck.marked[j] = true
                 end
             end
             historyLocked = true
@@ -144,67 +149,59 @@ local function CheckSmartDetection()
 end
 
 -- ============================================================
--- Aura check (called from UNIT_AURA event on "player")
---
--- State machine for tracking Penance casts and the proc buff:
---
---   buff PRESENT at login -> deckCount = 0 (waiting for Penance)
---   buff ABSENT at login  -> deckCount = 1 (Penance already cast since last reset)
---   buff reappears        -> mark current slot as proc, procPending = false
---   buff absent (while deckCount < 3) -> Penance cast, increment deck
---   deckCount reaches 3   -> reset after 1 second (buff reapplies then)
+-- Penance channel detection (called from UNIT_SPELLCAST_CHANNEL_START)
 -- ============================================================
-function deck:OnPlayerAura()
-     local castInfo = C_CastInfo and C_CastInfo.GetCastBarInfoByUnit("player")
-        if castInfo then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                "%s CAST BAR: spellID=%d name=%s elapsed=%.3f",
-                DBG, castInfo.spellID or 0, castInfo.name or "(none)", castInfo.elapsed or 0))
-        end
-        if castInfo and castInfo.spellID == PENCE_SPELL_ID then
-        DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            "%s PENCE cast detected via cast bar (channel=%.3fs)", DBG, castInfo.elapsed or 0))
-        -- PENCE started: increment deck count
-        local now = GetGameTime()
-        local debounceGap = now - lastCastTime
-        if debounceGap < CAST_DEBOUNCE then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                "%s   DEBOUNCE SKIP (%.3f < %.3f)", DBG, debounceGap, CAST_DEBOUNCE))
-            return
-        end
-        lastCastTime = now
-
-        deckCount = deckCount + 1
-        addon.SafeSetIcon(addon.ui, deckCount, "noproc")
-        marked[deckCount] = true
-        history[#history + 1] = 0
-        if #history > HISTORY_MAX then table.remove(history, 1) end
-
-        DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            "%s   deckCount=%d/3 history=[%s]",
-            DBG, deckCount, table.concat(history, ",")))
-
-        if deckCount >= 3 then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                "%s   DECK FULL (3) — scheduling 1s reset", DBG))
-            C_Timer.After(1, function()
-                DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                    "%s   RESET TIMER FIRED", DBG))
-                ResetDeck()
-            end)
-        end
-
-        if not inDungeon and not historyLocked then
-            CheckSmartDetection()
-        end
+function deck:OnPenanceChannel(spellID, spellName)
+    if not PENANCE_SPELL_IDS[spellID] then
         return
     end
 
-    -- Also check proc buff state for reset detection
+    DEFAULT_CHAT_FRAME:AddMessage(string.format(
+        "%s PENCE CHANNEL_START: spellID=%d name=%s",
+        DBG, spellID, spellName or "(none)"))
+
+    local now = GetGameTime()
+    local debounceGap = now - lastCastTime
+    if debounceGap < CAST_DEBOUNCE then
+        DEFAULT_CHAT_FRAME:AddMessage(string.format(
+            "%s   DEBOUNCE SKIP (%.3f < %.3f)", DBG, debounceGap, CAST_DEBOUNCE))
+        return
+    end
+    lastCastTime = now
+
+    deckCount = deckCount + 1
+    addon.SafeSetIcon(addon.ui, deckCount, "noproc")
+    deck.marked[deckCount] = true
+    history[#history + 1] = 0
+    if #history > HISTORY_MAX then table.remove(history, 1) end
+
+    DEFAULT_CHAT_FRAME:AddMessage(string.format(
+        "%s   deckCount=%d/3 history=[%s]",
+        DBG, deckCount, table.concat(history, ",")))
+
+    if deckCount >= 3 then
+        DEFAULT_CHAT_FRAME:AddMessage(string.format(
+            "%s   DECK FULL (3) — scheduling 1s reset", DBG))
+        C_Timer.After(1, function()
+            DEFAULT_CHAT_FRAME:AddMessage(string.format(
+                "%s   RESET TIMER FIRED", DBG))
+            ResetDeck()
+        end)
+    end
+
+    if not inDungeon and not historyLocked then
+        CheckSmartDetection()
+    end
+end
+
+-- ============================================================
+-- Aura check (called from UNIT_AURA event on "player")
+-- Used only for proc buff reapplied detection (deck reset)
+-- ============================================================
+function deck:OnPlayerAura()
     local hasBuff = false
     local buffAura = nil
 
-    -- Print all helpful auras for debugging
     local auraList = ""
     local playerAuras = nil
     local ok, result = pcall(C_UnitAuras.GetUnitAuras, "player", "HELPFUL")
@@ -229,20 +226,18 @@ function deck:OnPlayerAura()
     lastBuffPresent = hasBuff
 
     DEFAULT_CHAT_FRAME:AddMessage(string.format(
-        "%s AURA evt: hasBuff=%s prev=%s deck=%d procPend=%s totalAuras=%d auras=[%s]",
-        DBG, tostring(hasBuff), tostring(prevState), deckCount, tostring(procPending),
+        "%s AURA evt: hasBuff=%s prev=%s deck=%d totalAuras=%d auras=[%s]",
+        DBG, tostring(hasBuff), tostring(prevState), deckCount,
         playerAuras and #playerAuras or 0, auraList))
     if buffAura then
         DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            "%s   ^^^ PROC BUFF MATCH: name=%s spellID=%d", DBG, buffAura.name, buffAura.spellID))
+            "%s   ^^^ PROC BUFF: name=%s spellID=%d", DBG, buffAura.name, buffAura.spellID))
     end
 
-    -- Buff reapplied after reset
+    -- Buff reapplied after deck reset
     if not prevState and hasBuff then
         DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            "%s TRANSITION: absent->present (RESET) deckCount=%d",
-            DBG, deckCount))
-        procPending = true
+            "%s RESET: buff reapplied deckCount=%d", DBG, deckCount))
         if deckCount > 0 then
             ResetDeck()
             DEFAULT_CHAT_FRAME:AddMessage(string.format(

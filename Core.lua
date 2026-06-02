@@ -28,6 +28,7 @@ local eventFrame = CreateFrame("Frame")
 local EVENT_LIST = {
     "ADDON_LOADED",
     "PLAYER_LOGIN",
+    "UNIT_SPELLCAST_CHANNEL_START",
     "UNIT_AURA",
     "GROUP_ROSTER_UPDATE",
     "PLAYER_ENTERING_WORLD",
@@ -90,9 +91,9 @@ eventHandlers["PLAYER_ENTERING_WORLD"] = function()
         addon.deck:OnEnterWorld()
     end
 end
-eventHandlers["UNIT_AURA"] = function(unit)
+eventHandlers["UNIT_SPELLCAST_CHANNEL_START"] = function(unit, castID, spellID, spellName, castTime)
     if addon.initialized and unit == "player" then
-        addon.deck:OnPlayerAura()
+        addon.deck:OnPenanceChannel(spellID, spellName)
     end
 end
 
