@@ -31,6 +31,12 @@ local history = {}
 local HISTORY_MAX = 20
 local historyLocked
 
+-- Debounce timer: ignore "buff absent" events within this window
+-- after a Penance cast to prevent counting multiple bolts as
+-- separate casts (single Penance fires 4+ bolts simultaneously)
+local lastCastTime = 0
+local CAST_DEBOUNCE = 0.5
+
 -- ============================================================
 -- Initialization
 -- ============================================================
@@ -51,6 +57,7 @@ end
 local function ResetDeck()
     deckCount = 0
     procPending = false
+    lastCastTime = 0
     for i = 1, 3 do marked[i] = false end
     addon.ui:SetAllIcons("empty")
 end
@@ -147,6 +154,14 @@ function deck:OnPlayerAura()
             ResetDeck()
         end
     elseif deckCount < 3 then
+        -- Debounce: ignore "buff absent" events within a short window
+        -- after a Penance cast (single cast fires 4+ bolts simultaneously)
+        local now = GetTime()
+        if now - lastCastTime < CAST_DEBOUNCE then
+            return
+        end
+        lastCastTime = now
+
         -- Proc buff absent and deck not full -> Penance was cast
         -- If a proc buff arrived since last cast, mark the previous slot as proc
         if procPending and deckCount >= 1 then
