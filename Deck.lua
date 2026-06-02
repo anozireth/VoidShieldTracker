@@ -147,15 +147,16 @@ function deck:OnPlayerAura()
     local buffAura = nil
 
     -- Print all helpful auras for debugging
-    local auraList = ""
-    AuraUtil.ForEachAura("player", "HELPFUL", nil, function(aura)
-        if aura.name == PROC_BUFF_NAME or aura.spellID == PROC_BUFF_ID then
-            hasBuff = true
-            buffAura = aura
-        end
-        if auraList ~= "" then auraList = auraList .. ", " end
-        auraList = auraList .. string.format("[%d] %s", aura.spellID, aura.name)
-    end)
+     local auraList = ""
+     AuraUtil.ForEachAura("player", "HELPFUL", nil, function(aura)
+         if aura.name == PROC_BUFF_NAME or aura.spellID == PROC_BUFF_ID then
+             hasBuff = true
+             buffAura = aura
+         end
+         local name = aura.name or "(no name)"
+         if auraList ~= "" then auraList = auraList .. ", " end
+         auraList = auraList .. string.format("[%d] %s", aura.spellID or 0, name)
+     end)
 
     local prevState = lastBuffPresent
     lastBuffPresent = hasBuff
