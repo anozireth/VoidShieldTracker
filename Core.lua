@@ -77,30 +77,6 @@ eventHandlers["ADDON_LOADED"] = function(self, event, loadedName)
         playerGUID = nil
     end
 end
-eventHandlers["PLAYER_LOGIN"] = function()
-    addon:OnLogin()
-    addon.initialized = true
-end
-eventHandlers["GROUP_ROSTER_UPDATE"] = function()
-    if addon.initialized then
-        addon.deck:CheckDungeonState()
-    end
-end
-eventHandlers["PLAYER_ENTERING_WORLD"] = function()
-    if addon.initialized then
-        addon.deck:OnEnterWorld()
-    end
-end
-eventHandlers["UNIT_SPELLCAST_CHANNEL_START"] = function(unit, castID, spellID, spellName, castTime)
-    if addon.initialized and unit == "player" then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[VST-EVENT]|r CHANNEL_START: spellID=" .. tostring(spellID))
-        if addon.deck and addon.deck.OnPenanceChannel then
-            addon.deck:OnPenanceChannel(spellID, spellName)
-        else
-            DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[VST-EVENT]|r deck or OnPenanceChannel is nil")
-        end
-    end
-end
 
 local eventFrame = CreateFrame("Frame")
 for e, _ in pairs(eventHandlers) do
@@ -121,6 +97,31 @@ function addon:OnLogin()
 
     -- Initialize deck state
     self.deck:Initialize()
+
+    -- NOW define event handlers (after all modules loaded)
+    eventHandlers["PLAYER_LOGIN"] = function()
+        addon.initialized = true
+    end
+    eventHandlers["UNIT_SPELLCAST_CHANNEL_START"] = function(unit, castID, spellID, spellName, castTime)
+        if addon.initialized and unit == "player" and addon.deck and addon.deck.OnPenanceChannel then
+            addon.deck:OnPenanceChannel(spellID, spellName)
+        end
+    end
+    eventHandlers["UNIT_AURA"] = function(unit)
+        if addon.initialized and unit == "player" and addon.deck and addon.deck.OnPlayerAura then
+            addon.deck:OnPlayerAura()
+        end
+    end
+    eventHandlers["GROUP_ROSTER_UPDATE"] = function()
+        if addon.initialized and addon.deck and addon.deck.CheckDungeonState then
+            addon.deck:CheckDungeonState()
+        end
+    end
+    eventHandlers["PLAYER_ENTERING_WORLD"] = function()
+        if addon.initialized and addon.deck and addon.deck.OnEnterWorld then
+            addon.deck:OnEnterWorld()
+        end
+    end
 
     -- Restore saved position
     local db = VSTDB or {}
