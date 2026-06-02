@@ -128,7 +128,7 @@ function ui:CreateMinimapButton()
         GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
         GameTooltip:AddLine("Void Shield Tracker", 0.5, 0.7, 1, true)
         GameTooltip:AddLine("Left-click: Toggle visibility", 0.7, 0.7, 0.7)
-        GameTooltip:AddLine("Right-click: Reset deck", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine("Right-click: Reset deck & position", 0.7, 0.7, 0.7)
         GameTooltip:Show()
     end)
 
@@ -157,7 +157,7 @@ function ui:CreateMinimapButton()
         self:SetClampRectRelativeToCurrentParent()
     end)
 
-    btn:SetScript("OnClick", function(self, button)
+     btn:SetScript("OnClick", function(self, button)
         if button == "LeftButton" then
             if ui.frame:IsShown() then
                 ui.frame:Hide()
@@ -166,8 +166,13 @@ function ui:CreateMinimapButton()
             end
         elseif button == "RightButton" then
             addon.deck:Reset()
+            VSTDB = VSTDB or {}
+            VSTDB.frameX = 0
+            VSTDB.frameY = 0
+            ui.frame:ClearAllPoints()
+            ui.frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
             DEFAULT_CHAT_FRAME:AddMessage(
-                "|cff88ccffVoid Shield Tracker|r: Deck manually reset",
+                "|cff88ccffVoid Shield Tracker|r: Deck reset & frame position cleared",
                 0.5, 0.7, 1)
         end
     end)
@@ -224,6 +229,15 @@ _G.SlashCmdList["VST"] = function(msg)
         addon.deck:Reset()
         DEFAULT_CHAT_FRAME:AddMessage(
             "|cff88ccffVoid Shield Tracker|r: Deck manually reset",
+            0.5, 0.7, 1)
+    elseif msg == "resetpos" then
+        VSTDB = VSTDB or {}
+        VSTDB.frameX = 0
+        VSTDB.frameY = 0
+        ui.frame:ClearAllPoints()
+        ui.frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        DEFAULT_CHAT_FRAME:AddMessage(
+            "|cff88ccffVoid Shield Tracker|r: Frame position reset to center",
             0.5, 0.7, 1)
     elseif msg == "status" then
         DEFAULT_CHAT_FRAME:AddMessage(
