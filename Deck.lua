@@ -41,6 +41,7 @@ local DBG = "|cffffaa00[VST-DBG]|r"
 -- Deck state
 -- ============================================================
 local deckCount
+local marked = {}
 local inDungeon
 local history = {}
 local HISTORY_MAX = 20
