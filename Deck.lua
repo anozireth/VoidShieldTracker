@@ -31,9 +31,12 @@ local history = {}
 local HISTORY_MAX = 20
 local historyLocked
 
--- Debounce timer: ignore "buff absent" events within this window
--- after a Penance cast to prevent counting multiple bolts as
--- separate casts (single Penance fires 4+ bolts simultaneously)
+-- Track whether the proc buff was present on the PREVIOUS aura event.
+-- This lets us detect state changes (present->absent = cast, absent->present = reset)
+-- and ignore UNIT_AURA events from unrelated auras.
+local lastBuffPresent = nil
+
+-- Debounce: ignore rapid "buff absent" events from multi-bolt casts
 local lastCastTime = 0
 local CAST_DEBOUNCE = 0.5
 
@@ -143,55 +146,64 @@ function deck:OnPlayerAura()
         end
     end)
 
-    if hasBuff then
-        -- Proc buff present -> deck is at 0 (waiting for next Penance)
-        -- Mark the deck as having a proc pending for the NEXT cast
-        procPending = true
+    -- Only act when the buff's presence CHANGED since the last event
+    local prevState = lastBuffPresent
+    lastBuffPresent = hasBuff
 
-        -- If deckCount was non-zero, this means the deck already reset
-        -- (buff reapplied after reaching 3) -- reset cleanly
-        if deckCount > 0 then
-            ResetDeck()
+    -- First event after login: just set state, don't act on it
+    if prevState == nil then
+        -- If buff absent at first check, assume a cast already happened
+        if not hasBuff then
+            deckCount = 1
+            if deckCount >= 1 then
+                addon.ui:SetIcon(deckCount, "proc")
+                history[#history + 1] = 1
+                if #history > HISTORY_MAX then table.remove(history, 1) end
+                marked[1] = true
+            end
         end
-    elseif deckCount < 3 then
-        -- Debounce: ignore "buff absent" events within a short window
-        -- after a Penance cast (single cast fires 4+ bolts simultaneously)
+        return
+    end
+
+    -- State transition: buff went from present to absent => Penance cast
+    if prevState and not hasBuff then
         local now = GetTime()
         if now - lastCastTime < CAST_DEBOUNCE then
             return
         end
         lastCastTime = now
 
-        -- Proc buff absent and deck not full -> Penance was cast
-        -- If a proc buff arrived since last cast, mark the previous slot as proc
         if procPending and deckCount >= 1 then
             addon.ui:SetIcon(deckCount, "proc")
-            -- Update history: change last entry from 0 to 1
             if #history > 0 and history[#history] == 0 then
                 history[#history] = 1
             end
         end
         procPending = false
 
-        -- Draw the next card (increment deck count)
         deckCount = deckCount + 1
-
-        -- Mark this slot as non-proc (default; proc buff may override on reappearance)
         addon.ui:SetIcon(deckCount, "noproc")
         marked[deckCount] = true
         history[#history + 1] = 0
         if #history > HISTORY_MAX then table.remove(history, 1) end
 
-        -- Deck complete? Schedule reset after 1 second
         if deckCount >= 3 then
             C_Timer.After(1, function()
                 ResetDeck()
             end)
         end
 
-        -- Smart detection check (only outside dungeons)
         if not inDungeon and not historyLocked then
             CheckSmartDetection()
+        end
+    end
+
+    -- State transition: buff went from absent to present => deck reset
+    if not prevState and hasBuff then
+        -- Deck already at 0 from reset timer; clear proc pending
+        procPending = true
+        if deckCount > 0 then
+            ResetDeck()
         end
     end
 end
