@@ -166,6 +166,7 @@ function ui:Create()
     self:CreateMinimapButton()
     self:CreateOptions()
     self:UpdateScale()
+    self:UpdateOpacity()
 end
 
 -- ============================================================
@@ -232,6 +233,10 @@ end
 
 function ui:UpdateScale()
     if self.frame then self.frame:SetScale(VSTDB.scale or 1.0) end
+end
+
+function ui:UpdateOpacity()
+    if self.frame then self.frame:SetAlpha(VSTDB.opacity or 1.0) end
 end
 
 function ui:ToggleShown()
@@ -418,6 +423,12 @@ function ui:CreateOptions()
     makeSlider(panel, "Frame scale", 16, y, 0.5, 2.0, 0.05,
         function() return VSTDB.scale end,
         function(v) VSTDB.scale = v; ui:UpdateScale() end,
+        function(v) return string.format("%.0f%%", v * 100) end)
+
+    y = y - 56
+    makeSlider(panel, "Opacity", 16, y, 0.1, 1.0, 0.05,
+        function() return VSTDB.opacity end,
+        function(v) VSTDB.opacity = v; ui:UpdateOpacity() end,
         function(v) return string.format("%.0f%%", v * 100) end)
 
     y = y - 56

@@ -23,6 +23,7 @@ local DB_DEFAULTS = {
     shown            = true,
     locked           = false,
     scale            = 1.0,
+    opacity          = 1.0,
     procCheckDelayMs = 200,
     pruneOnZone      = true,   -- assume a fresh deck when entering an instance
     minimap          = { hide = false, angle = 220 },
@@ -118,7 +119,6 @@ eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 eventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
 eventFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_CHANNEL_START")
-eventFrame:RegisterEvent("UNIT_AURA")
 eventFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
 
 eventFrame:SetScript("OnEvent", function(_, event, ...)
@@ -149,13 +149,6 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
         local unit, _, spellID = ...
         if unit == "player" then
             addon.deck:OnPenanceCast(spellID)
-        end
-
-    elseif event == "UNIT_AURA" then
-        if not addon.isDiscPriest then return end
-        local unit = ...
-        if unit == "player" then
-            addon.deck:OnAuraUpdate()
         end
 
     elseif event == "ACTIONBAR_SLOT_CHANGED" then

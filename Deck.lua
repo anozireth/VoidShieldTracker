@@ -67,14 +67,9 @@ local ACTION_BUTTON_PREFIXES = {
 
 local PROC_CHECK_DELAY_DEFAULT_MS = 200
 
--- "Master the Darkness" — the Void Shield proc buff. Consuming it (casting the
--- shielded PW:S) clears the deck display early.
-local MTD_SPELL_ID = 1253591
-
--- Penance has a 7.2s cooldown. Once a deck (3 casts) completes, clear the
--- display 6s after the completing cast was recorded — roughly 1s before
--- Penance is available again, so the board is fresh for the next deck.
-local DECK_CLEAR_DELAY = 6.0
+-- Once a deck (3 casts) completes, blank the display this long after the
+-- completing cast so the board shows fresh face-down cards for the next deck.
+local DECK_CLEAR_DELAY = 1.0
 
 -- Result values fed to the predictor.
 local RESULT_PROC    = "proc"
@@ -100,11 +95,10 @@ local shieldActive        = false  -- true when PROC_SLOT_TEXTURE is visible
 local pendingCheck        = false
 local shieldActiveOnCast  = false
 
--- Display-clear state: once a deck completes (or the proc is consumed) the
--- board blanks to face-down until the next Penance starts a new deck.
+-- Display-clear state: once a deck completes the board blanks to face-down
+-- until the next Penance starts a new deck.
 local displayCleared      = false
 local clearGen            = 0       -- bumped each cast; stale clear timers no-op
-local mtdPresent          = false   -- was Master the Darkness up last aura update
 
 -- ============================================================
 -- Phase-state filter
@@ -355,23 +349,6 @@ local function recordResult(result)
 end
 
 -- ============================================================
--- Aura watch: clear the board when Master the Darkness is consumed.
--- ============================================================
-function deck:OnAuraUpdate()
-    local has = false
-    if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
-        has = C_UnitAuras.GetPlayerAuraBySpellID(MTD_SPELL_ID) ~= nil
-    end
-    if mtdPresent and not has and not displayCleared then
-        -- Buff went away => Void Shield was cast; the deck is spent.
-        displayCleared = true
-        clearGen = clearGen + 1
-        refreshUI()
-    end
-    mtdPresent = has
-end
-
--- ============================================================
 -- Penance cast handling (UNIT_SPELLCAST_CHANNEL_START)
 -- ============================================================
 function deck:OnPenanceCast(spellID)
@@ -439,7 +416,6 @@ function deck:Initialize()
     shieldActiveOnCast    = false
     displayCleared        = false
     clearGen              = clearGen + 1
-    mtdPresent            = false
     watchSlot             = nil
     slotRefreshCountdown  = 0
     refreshWatchSlot()
@@ -463,7 +439,6 @@ function deck:OnEnterWorld()
         shieldActive          = false
         displayCleared        = false
         clearGen              = clearGen + 1
-        mtdPresent            = false
     else
         self:Initialize()
     end
@@ -483,8 +458,8 @@ end
 --   calibrating  : true while >1 phase is still possible (alignment unsure)
 --   watchSlotOk  : true if PW:S was found on the action bar
 function deck:GetDisplayState()
-    -- Board blanked (deck completed / proc consumed): show a fresh face-down
-    -- deck while still reporting the predictor's odds for the next cast.
+    -- Board blanked (deck completed): show a fresh face-down deck while still
+    -- reporting the predictor's odds for the next cast.
     if displayCleared then
         return {
             cards         = { "future", "future", "future" },
