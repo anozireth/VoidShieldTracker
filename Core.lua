@@ -105,6 +105,11 @@ function addon:OnLogin()
     DEFAULT_CHAT_FRAME:AddMessage(
         "|cff88ccffVoid Shield Tracker|r: Loaded (use /vst for commands)",
         0.5, 0.7, 1)
+    local f = self.ui.frame
+    local numPoints = f:GetNumPoints()
     DEFAULT_CHAT_FRAME:AddMessage(
-        "|cff88ccffVoid Shield Tracker|r: Frame shown=" .. tostring(self.ui.frame:IsShown()))
+        "|cff88ccffVST|r: shown=" .. tostring(f:IsShown())
+        .. " size=" .. tostring(f:GetWidth()) .. "x" .. tostring(f:GetHeight())
+        .. " strata=" .. tostring(f:GetFrameStrata())
+        .. " numAnchors=" .. tostring(numPoints))
 end
