@@ -29,11 +29,19 @@ local PENANCE_SPELL_IDS = {
     [47750] = true,  -- Penance per-bolt healing tick
 }
 
--- ============================================================
--- Proc buff detection (for deck reset detection)
--- ============================================================
-local PROC_BUFF_NAME = "Master the Darkness"
-local PROC_BUFF_ID = 1253591
+-- Power Word: Shield action-button textures for proc detection
+-- PROC_SLOT_TEXTURE = proc overlay visible (borrowed time / void shield proc)
+-- BASE_SLOT_TEXTURE = normal not-proced PW:S icon
+local BASE_SLOT_TEXTURE = 135940
+local PROC_SLOT_TEXTURE = 7514191
+
+-- PW:S spell IDs to find the action-bar slot
+local PW_SHIELD_SPELL_IDS = {
+    [17] = true,
+    [1253593] = true,
+}
+
+local PROC_CHECK_DELAY_MS = 200  -- configurable, default 200ms
 
 local DBG = "|cffffaa00[VST-DBG]|r"
 
@@ -53,6 +61,58 @@ local lastBuffPresent = nil
 -- Debounce: ignore rapid CHANNEL_START events from multi-bolt casts
 local lastCastTime = 0
 local CAST_DEBOUNCE = 0.5
+
+-- Detection state (owned by onPenanceCastStart)
+local pendingCheck = false
+local shieldActiveOnCast = false
+
+-- ============================================================
+-- Action bar slot cache for PW:S
+-- ============================================================
+local watchSlot = nil
+local function refreshWatchSlot()
+    for slot = 1, 180 do
+        local actionType, id = GetActionInfo(slot)
+        if actionType == "spell" and PW_SHIELD_SPELL_IDS[id] then
+            watchSlot = slot
+            return
+        end
+    end
+    watchSlot = nil
+end
+
+-- Get current PW:S button texture, preferring cached slot
+local function getShieldTexture()
+    if watchSlot then
+        local tex = GetActionTexture(watchSlot)
+        if tex then return tex end
+    end
+    -- Fallback: scan action bars
+    local prefixes = {"ActionButton", "MultiActionBar1Button", "MultiActionBar2Button", "MultiActionBar3Button", "MultiActionBar4Button"}
+    for _, prefix in ipairs(prefixes) do
+        for i = 1, 12 do
+            local btn = _G[prefix .. i]
+            if btn and btn.icon then
+                local tex = btn.icon:GetTexture()
+                if tex == PROC_SLOT_TEXTURE or tex == BASE_SLOT_TEXTURE then
+                    return tex
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- Update shieldActive from current button texture
+local function pollShieldState()
+    local tex = getShieldTexture()
+    if tex == PROC_SLOT_TEXTURE then
+        pendingCheck = false
+    elseif tex == BASE_SLOT_TEXTURE then
+        pendingCheck = false
+    end
+    -- If tex is nil, keep last state
+end
 
 local function GetGameTime()
     local t = GetTime()
@@ -75,9 +135,10 @@ function deck:Initialize()
     historyLocked = false
     for i = 1, 3 do marked[i] = false end
     addon.SafeSetAllIcons(addon.ui, "empty")
+    refreshWatchSlot()
     DEFAULT_CHAT_FRAME:AddMessage(string.format(
-        "%s INIT complete: deckCount=%d ui=%s ui.icons=%s",
-        DBG, deckCount, tostring(addon.ui), tostring(addon.ui and addon.ui.icons)))
+        "%s INIT: watchSlot=%d ui=%s",
+        DBG, watchSlot and watchSlot or "nil", tostring(addon.ui)))
 end
 
 -- ============================================================
@@ -159,17 +220,8 @@ function deck:OnPenanceChannel(spellID, spellName)
     DEFAULT_CHAT_FRAME:AddMessage(string.format(
         "%s PENCE CHANNEL_START: spellID=%d name=%s",
         DBG, spellID, spellName or "(none)"))
-    DEFAULT_CHAT_FRAME:AddMessage(string.format(
-        "%s   ui=%s icons=%s", DBG, tostring(addon.ui), tostring(addon.ui and addon.ui.icons)))
 
-    if not PENANCE_SPELL_IDS[spellID] then
-        DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            "%s   SPELL NOT MATCHED", DBG))
-        return
-    end
-    DEFAULT_CHAT_FRAME:AddMessage(string.format(
-        "%s   SPELL MATCHED", DBG))
-
+    -- Debounce check
     local now = GetGameTime()
     local debounceGap = now - lastCastTime
     if debounceGap < CAST_DEBOUNCE then
@@ -177,86 +229,78 @@ function deck:OnPenanceChannel(spellID, spellName)
             "%s   DEBOUNCE SKIP (%.3f < %.3f)", DBG, debounceGap, CAST_DEBOUNCE))
         return
     end
-    lastCastTime = now
 
-    deckCount = deckCount + 1
+    -- Start proc detection via action button texture
+    pendingCheck = true
+    shieldActiveOnCast = (getShieldTexture() == PROC_SLOT_TEXTURE)
     DEFAULT_CHAT_FRAME:AddMessage(string.format(
-        "%s   Setting icon slot %d to noproc", DBG, deckCount))
-    addon.SafeSetIcon(addon.ui, deckCount, "noproc")
-    DEFAULT_CHAT_FRAME:AddMessage(string.format(
-        "%s   icon set complete. deckCount=%d", DBG, deckCount))
-    marked[deckCount] = true
-    history[#history + 1] = 0
-    if #history > HISTORY_MAX then table.remove(history, 1) end
+        "%s   shieldActiveOnCast=%s", DBG, tostring(shieldActiveOnCast)))
+    pollShieldState()
 
-    DEFAULT_CHAT_FRAME:AddMessage(string.format(
-        "%s   deckCount=%d/3 history=[%s]",
-        DBG, deckCount, table.concat(history, ",")))
+    C_Timer.After(PROC_CHECK_DELAY_MS / 1000, function()
+        if not pendingCheck then return end
+        pendingCheck = false
 
-    if deckCount >= 3 then
+        local tex = getShieldTexture()
+        local result = "NO_PROC"
+        if shieldActiveOnCast then
+            result = "PROC"
+        elseif tex == PROC_SLOT_TEXTURE then
+            result = "PROC"
+        end
+
         DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            "%s   DECK FULL (3) — scheduling 1s reset", DBG))
-        C_Timer.After(1, function()
-            DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                "%s   RESET TIMER FIRED", DBG))
-            ResetDeck()
-        end)
-    end
+            "%s   RESULT=%s (tex=%s, prev=%s)", DBG, result, tostring(tex), tostring(shieldActiveOnCast)))
 
-    if not inDungeon and not historyLocked then
-        CheckSmartDetection()
-    end
+        lastCastTime = now
+        deckCount = deckCount + 1
+        addon.SafeSetIcon(addon.ui, deckCount, result == "PROC" and "proc" or "noproc")
+        marked[deckCount] = true
+        history[#history + 1] = result == "PROC" and 1 or 0
+        if #history > HISTORY_MAX then table.remove(history, 1) end
+
+        DEFAULT_CHAT_FRAME:AddMessage(string.format(
+            "%s   deckCount=%d/3 history=[%s]",
+            DBG, deckCount, table.concat(history, ",")))
+
+        if deckCount >= 3 then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format(
+                "%s   DECK FULL (3) — scheduling 1s reset", DBG))
+            C_Timer.After(1, function()
+                DEFAULT_CHAT_FRAME:AddMessage(string.format(
+                    "%s   RESET TIMER FIRED", DBG))
+                ResetDeck()
+            end)
+        end
+
+        if not inDungeon and not historyLocked then
+            CheckSmartDetection()
+        end
+    end)
 end
 
 -- ============================================================
--- Aura check (called from UNIT_AURA event on "player")
+-- Aura check (UNIT_AURA event on "player")
 -- Used only for proc buff reapplied detection (deck reset)
 -- ============================================================
 function deck:OnPlayerAura()
+    -- Check if Master the Darkness buff reapplied (deck reset)
     local hasBuff = false
-    local buffAura = nil
-
-    local auraList = ""
-    local playerAuras = nil
     local ok, result = pcall(C_UnitAuras.GetUnitAuras, "player", "HELPFUL")
     if ok and result then
-        playerAuras = result
-    end
-    if playerAuras then
-        for i = 1, #playerAuras do
-            local aura = playerAuras[i]
-            if aura.spellID == PROC_BUFF_ID or aura.name == PROC_BUFF_NAME then
+        for i = 1, #result do
+            local a = result[i]
+            if a.spellID == 1253591 or a.name == "Master the Darkness" then
                 hasBuff = true
-                buffAura = aura
+                break
             end
-            local name = aura.name or "(no name)"
-            local sid = aura.spellID or 0
-            if auraList ~= "" then auraList = auraList .. ", " end
-            auraList = auraList .. string.format("[%d] %s", sid, name)
         end
     end
 
-    local prevState = lastBuffPresent
-    lastBuffPresent = hasBuff
-
-    DEFAULT_CHAT_FRAME:AddMessage(string.format(
-        "%s AURA evt: hasBuff=%s prev=%s deck=%d totalAuras=%d auras=[%s]",
-        DBG, tostring(hasBuff), tostring(prevState), deckCount,
-        playerAuras and #playerAuras or 0, auraList))
-    if buffAura then
+    if hasBuff and deckCount > 0 then
         DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            "%s   ^^^ PROC BUFF: name=%s spellID=%d", DBG, buffAura.name, buffAura.spellID))
-    end
-
-    -- Buff reapplied after deck reset
-    if not prevState and hasBuff then
-        DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            "%s RESET: buff reapplied deckCount=%d", DBG, deckCount))
-        if deckCount > 0 then
-            ResetDeck()
-            DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                "%s   reset deck to 0", DBG))
-        end
+            "%s RESET: proc buff reapplied, resetting deck from %d", DBG, deckCount))
+        ResetDeck()
     end
 end
 
