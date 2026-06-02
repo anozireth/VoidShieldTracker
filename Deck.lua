@@ -72,7 +72,7 @@ function deck:Initialize()
     inDungeon = false
     history = {}
     historyLocked = false
-    for i = 1, 3 do deck.marked[i] = false end
+    for i = 1, 3 do marked[i] = false end
     addon.SafeSetAllIcons(addon.ui, "empty")
 end
 
@@ -82,7 +82,7 @@ end
 local function ResetDeck()
     deckCount = 0
     lastCastTime = 0
-    for i = 1, 3 do deck.marked[i] = false end
+    for i = 1, 3 do marked[i] = false end
     addon.SafeSetAllIcons(addon.ui, "empty")
 end
 
@@ -104,12 +104,12 @@ local function CheckSmartDetection()
                 deckCount = ((deckCount - 1) % 3) + 1
             end
 
-            for j = 1, 3 do deck.marked[j] = false end
+            for j = 1, 3 do marked[j] = false end
             for j = 1, deckCount do
                 local histIdx = i + j - 1
                 if histIdx <= n then
                     addon.SafeSetIcon(addon.ui, j, history[histIdx] == 1 and "proc" or "noproc")
-                    deck.marked[j] = true
+                    marked[j] = true
                 end
             end
             historyLocked = true
@@ -131,12 +131,12 @@ local function CheckSmartDetection()
                 deckCount = ((deckCount - 1) % 3) + 1
             end
 
-            for j = 1, 3 do deck.marked[j] = false end
+            for j = 1, 3 do marked[j] = false end
             for j = 1, deckCount do
                 local histIdx = boundaryPos + j - 1
                 if histIdx <= n then
                     addon.SafeSetIcon(addon.ui, j, history[histIdx] == 1 and "proc" or "noproc")
-                    deck.marked[j] = true
+                    marked[j] = true
                 end
             end
             historyLocked = true
@@ -171,7 +171,7 @@ function deck:OnPenanceChannel(spellID, spellName)
 
     deckCount = deckCount + 1
     addon.SafeSetIcon(addon.ui, deckCount, "noproc")
-    deck.marked[deckCount] = true
+    marked[deckCount] = true
     history[#history + 1] = 0
     if #history > HISTORY_MAX then table.remove(history, 1) end
 
