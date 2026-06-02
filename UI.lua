@@ -12,8 +12,8 @@ addon.ui = ui
 -- ============================================================
 -- Constants
 -- ============================================================
-local TX_PROC    = "Interface\\Icons\\Spell_Holy_PowerWordShield"
-local TX_NOPROC  = "Interface\\Icons\\INV_Misc_QuestionMark"
+local TX_PROC    = "Interface\\Icons\\Inv12_apextalent_priest_voidshield"
+local TX_NOPROC  = "Interface\\Icons\\spell_holy_penance"
 local TX_EMPTY   = "Interface\\Buttons\\UI-EmptySlot"
 
 -- ============================================================
@@ -78,7 +78,7 @@ function ui:Create()
     -- Title
     local title = frame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
     title:SetPoint("TOP", frame, "TOP", 0, -4)
-    title:SetText("VOID SHIFT DECK")
+    title:SetText("VOID SHIELD DECK")
     title:SetTextColor(0.7, 0.7, 0.9)
 
     -- Icon slots
@@ -132,6 +132,18 @@ function ui:CreateMinimapButton()
         GameTooltip:AddLine("Right-click: Reset deck", 0.7, 0.7, 0.7)
         GameTooltip:Show()
     end)
+
+    -- Show frame position reset on right-click
+    ui.frame:SetScript("OnEnter", function()
+        GameTooltip:SetOwner(ui.frame, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Void Shield Tracker", 0.5, 0.7, 1, true)
+        GameTooltip:AddLine("Drag: Move frame", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine("Right-click: Reset position", 0.7, 0.7, 0.7)
+        GameTooltip:Show()
+    end)
+    ui.frame:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
     btn:SetScript("OnLeave", function()
         GameTooltip:Hide()
     end)
@@ -157,6 +169,21 @@ function ui:CreateMinimapButton()
             addon.deck:Reset()
             DEFAULT_CHAT_FRAME:AddMessage(
                 "|cff88ccffVoid Shield Tracker|r: Deck manually reset",
+                0.5, 0.7, 1)
+        end
+    end)
+
+    -- Reset position context menu (right-click on frame)
+    ui.frame:SetScript("OnMouseDown", function(self, button)
+        if button == "RightButton" then
+            -- Reset position to center and clear saved position
+            VSTDB = VSTDB or {}
+            VSTDB.frameX = 0
+            VSTDB.frameY = 0
+            self:ClearAllPoints()
+            self:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+            DEFAULT_CHAT_FRAME:AddMessage(
+                "|cff88ccffVoid Shield Tracker|r: Frame position reset to center",
                 0.5, 0.7, 1)
         end
     end)
