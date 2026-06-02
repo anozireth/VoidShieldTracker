@@ -102,9 +102,9 @@ function addon:OnLogin()
 
     -- Show
     self.ui.frame:Show()
-
     DEFAULT_CHAT_FRAME:AddMessage(
         "|cff88ccffVoid Shield Tracker|r: Loaded (use /vst for commands)",
-        0.5, 0.7, 1
-    )
+        0.5, 0.7, 1)
+    DEFAULT_CHAT_FRAME:AddMessage(
+        "|cff88ccffVoid Shield Tracker|r: Frame shown=" .. tostring(self.ui.frame:IsShown()))
 end
