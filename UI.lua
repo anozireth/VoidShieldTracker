@@ -248,16 +248,21 @@ end
 -- ============================================================
 -- Minimap button
 -- ============================================================
-local MINIMAP_RADIUS = 80
+-- Place the button centre on the minimap rim (half in / half out) regardless
+-- of the minimap's actual size, matching LibDBIcon / other addons.
+local function minimapRadius()
+    return (Minimap:GetWidth() / 2) + 6
+end
 
 function ui:UpdateMinimapPosition()
     local btn = self.minimapButton
     if not btn then return end
     local angle = math.rad(VSTDB.minimap.angle or 220)
+    local r = minimapRadius()
     btn:ClearAllPoints()
     btn:SetPoint("CENTER", Minimap, "CENTER",
-        math.cos(angle) * MINIMAP_RADIUS,
-        math.sin(angle) * MINIMAP_RADIUS)
+        math.cos(angle) * r,
+        math.sin(angle) * r)
 end
 
 function ui:CreateMinimapButton()
@@ -431,10 +436,10 @@ function ui:CreateOptions()
 
     self.optionsPanel = panel
 
-    -- Register with the Settings API (12.0).
+    -- Register with the Settings API (12.0). Keep the auto-assigned numeric
+    -- category ID intact; OpenToCategory expects that number, not a string.
     if Settings and Settings.RegisterCanvasLayoutCategory then
         local category = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
-        category.ID = "VoidShieldTracker"
         Settings.RegisterAddOnCategory(category)
         self.optionsCategory = category
     end
@@ -442,7 +447,7 @@ end
 
 function ui:OpenOptions()
     if self.optionsCategory and Settings and Settings.OpenToCategory then
-        Settings.OpenToCategory(self.optionsCategory.ID)
+        Settings.OpenToCategory(self.optionsCategory:GetID())
     elseif InterfaceOptionsFrame_OpenToCategory and self.optionsPanel then
         InterfaceOptionsFrame_OpenToCategory(self.optionsPanel)
     end

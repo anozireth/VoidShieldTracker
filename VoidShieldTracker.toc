@@ -2,7 +2,7 @@
 ## Title: Void Shield Tracker
 ## Notes: Tracks Discipline Priest Void Shield proc deck (3 cards, 1 proc)
 ## Author: anozi
-## Version: 2.0.0
+## Version: 2.1.0
 ## IconTexture: Interface\Icons\Spell_Holy_PowerWordShield
 ## SavedVariables: VSTDB
 
