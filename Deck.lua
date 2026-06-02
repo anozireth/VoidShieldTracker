@@ -42,6 +42,17 @@ local lastBuffPresent = nil
 local lastCastTime = 0
 local CAST_DEBOUNCE = 0.5
 
+local function GetGameTime()
+    -- In WoW 12.0, GetTime() may return Unix epoch. Use game seconds instead.
+    local t = GetTime()
+    if t and t > 1000000 then
+        -- Looks like Unix epoch; convert to game time
+        local gameStart = 1717200000  -- approximate login epoch
+        return t - gameStart
+    end
+    return t
+end
+
 -- ============================================================
 -- Initialization
 -- ============================================================
@@ -199,17 +210,17 @@ function deck:OnPlayerAura()
 
     -- State transition: buff went from present to absent => Penance cast
     if prevState and not hasBuff then
-        local now = GetTime()
-        local debounceGap = now - lastCastTime
-        DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            "%s TRANSITION: present->absent (PENCE cast?) time=%s debounceGap=%.3f",
-            DBG, tostring(now), debounceGap))
-        if debounceGap < CAST_DEBOUNCE then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                "%s   DEBOUNCE SKIP (%.3f < %.3f)", DBG, debounceGap, CAST_DEBOUNCE))
-            return
-        end
-        lastCastTime = now
+          local now = GetGameTime()
+          local debounceGap = now - lastCastTime
+          DEFAULT_CHAT_FRAME:AddMessage(string.format(
+              "%s TRANSITION: present->absent (PENCE cast?) time=%.3f debounceGap=%.3f",
+              DBG, now, debounceGap))
+          if debounceGap < CAST_DEBOUNCE then
+              DEFAULT_CHAT_FRAME:AddMessage(string.format(
+                  "%s   DEBOUNCE SKIP (%.3f < %.3f)", DBG, debounceGap, CAST_DEBOUNCE))
+              return
+          end
+          lastCastTime = now
 
         DEFAULT_CHAT_FRAME:AddMessage(string.format(
             "%s   procPending=%s deckCount=%d", DBG, tostring(procPending), deckCount))
