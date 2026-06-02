@@ -21,6 +21,7 @@ addon.deck = deck
 -- Spell IDs / names
 local PROC_BUFF_NAME = "Master the Darkness"
 local PROC_BUFF_ID = 1253591
+local PENCE_SPELL_ID = 47540
 
 local DBG = "|cffffaa00[VST-DBG]|r"
 
@@ -154,9 +155,13 @@ end
 --   deckCount reaches 3   -> reset after 1 second (buff reapplies then)
 -- ============================================================
 function deck:OnPlayerAura()
-    -- Check for PENCE cast via cast bar (PENCE is a channel)
-    local castInfo = C_CastInfo and C_CastInfo.GetCastBarInfoByUnit("player")
-    if castInfo and castInfo.spellID == PROC_BUFF_ID then
+     local castInfo = C_CastInfo and C_CastInfo.GetCastBarInfoByUnit("player")
+        if castInfo then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format(
+                "%s CAST BAR: spellID=%d name=%s elapsed=%.3f",
+                DBG, castInfo.spellID or 0, castInfo.name or "(none)", castInfo.elapsed or 0))
+        end
+        if castInfo and castInfo.spellID == PENCE_SPELL_ID then
         DEFAULT_CHAT_FRAME:AddMessage(string.format(
             "%s PENCE cast detected via cast bar (channel=%.3fs)", DBG, castInfo.elapsed or 0))
         -- PENCE started: increment deck count
