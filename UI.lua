@@ -1,6 +1,6 @@
 --[[
-UI.lua - Frame creation, icon management, minimap button, slash commands.
-Loaded third (after Core.lua and Deck.lua). Attaches to addon.ui.
+    UI.lua - Card display, minimap button, options panel, slash commands.
+    Loaded last (after Core.lua and Deck.lua). Attaches to addon.ui.
 ]]
 
 local addon = _G["VoidShieldTracker"]
@@ -13,194 +13,439 @@ addon.ui = ui
 -- ============================================================
 local TX_PROC    = "Interface\\Icons\\Inv12_apextalent_priest_voidshield"
 local TX_NOPROC  = "Interface\\Icons\\spell_holy_penance"
-local TX_EMPTY   = "Interface\\Buttons\\UI-EmptySlot"
+local TX_UNKNOWN = "Interface\\Icons\\INV_Misc_QuestionMark"
+
+local CARD_SIZE = 46
+local CARD_GAP  = 8
+local PADDING   = 12
+
+-- Probability colour thresholds.
+local THRESH_LO, THRESH_HI = 0.34, 0.66
+
+local function probColor(prob)
+    if prob == nil   then return 0.5, 0.5, 0.5 end
+    if prob >= 1.0   then return 0.0, 0.9, 0.9 end   -- cyan: guaranteed
+    if prob <= 0.0   then return 0.9, 0.2, 0.2 end   -- red:  impossible
+    if prob >= THRESH_HI then return 0.1, 0.9, 0.1 end -- green
+    if prob >= THRESH_LO then return 0.9, 0.9, 0.1 end -- yellow
+    return 1.0, 0.5, 0.0                                -- orange
+end
 
 -- ============================================================
--- Icon update
+-- Card rendering
 -- ============================================================
-ui.icons = {}
+local function renderCard(card, state, highlight, hr, hg, hb)
+    local icon = card.icon
+    local bg   = card.bg
 
-function ui:SetIcon(slot, state)
-    local icon = ui.icons[slot]
-    if not icon then return end
-
-    if state == "empty" then
-        icon.texture:SetTexture(TX_EMPTY)
-        icon.texture:SetVertexColor(0.3, 0.3, 0.3, 0.5)
-    elseif state == "proc" then
-        icon.texture:SetTexture(TX_PROC)
-        icon.texture:SetVertexColor(0.4, 0.9, 0.4, 1)
+    if state == "proc" then
+        icon:SetTexture(TX_PROC)
+        icon:SetDesaturated(false)
+        icon:SetVertexColor(1, 1, 1, 1)
+        icon:SetAlpha(1)
+        bg:SetColorTexture(0.05, 0.30, 0.10, 0.9)
     elseif state == "noproc" then
-        icon.texture:SetTexture(TX_NOPROC)
-        icon.texture:SetVertexColor(0.9, 0.2, 0.2, 1)
+        icon:SetTexture(TX_NOPROC)
+        icon:SetDesaturated(true)
+        icon:SetVertexColor(0.85, 0.45, 0.45, 1)
+        icon:SetAlpha(0.9)
+        bg:SetColorTexture(0.30, 0.06, 0.06, 0.9)
+    elseif state == "unknown" then
+        icon:SetTexture(TX_UNKNOWN)
+        icon:SetDesaturated(false)
+        icon:SetVertexColor(0.95, 0.9, 0.3, 1)
+        icon:SetAlpha(0.9)
+        bg:SetColorTexture(0.18, 0.16, 0.05, 0.9)
+    else -- "future" (face-down)
+        icon:SetTexture(TX_UNKNOWN)
+        icon:SetDesaturated(true)
+        icon:SetVertexColor(0.5, 0.6, 0.8, 1)
+        icon:SetAlpha(0.18)
+        bg:SetColorTexture(0.06, 0.08, 0.16, 0.9)
     end
-end
 
-function ui:SetAllIcons(state)
-    for i = 1, 3 do
-        self:SetIcon(i, state)
+    if highlight then
+        card:SetBackdropBorderColor(hr, hg, hb, 1)
+    else
+        card:SetBackdropBorderColor(0.35, 0.35, 0.45, 1)
     end
 end
 
 -- ============================================================
--- Frame creation
+-- Main frame
 -- ============================================================
 function ui:Create()
-    -- Main tracker frame (BackdropTemplate for native backdrop support)
-    local frame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-    frame:SetWidth(200)
-    frame:SetHeight(64)
-    frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    if self.frame then return end
+
+    local totalCards = CARD_SIZE * 3 + CARD_GAP * 2
+    local width  = totalCards + PADDING * 2
+    local height = CARD_SIZE + 56
+
+    local frame = CreateFrame("Frame", "VoidShieldTrackerFrame", UIParent, "BackdropTemplate")
+    frame:SetSize(width, height)
+    frame:SetScale(VSTDB.scale or 1.0)
+
+    -- Restore saved position, else centre.
+    local p = VSTDB.pos
+    if p and p.point then
+        frame:SetPoint(p.point, UIParent, p.relPoint, p.x, p.y)
+    else
+        frame:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
+    end
+
+    frame:SetBackdrop({
+        bgFile   = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1, tile = true, tileSize = 16,
+    })
+    frame:SetBackdropColor(0, 0, 0, 0.82)
+    frame:SetBackdropBorderColor(0.32, 0.32, 0.4, 1)
+
     frame:SetMovable(true)
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStart", function(self)
+        if not VSTDB.locked then self:StartMoving() end
+    end)
     frame:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
-        VSTDB = VSTDB or {}
-        local cx, cy = self:GetCenter()
-        local pcx, pcy = UIParent:GetCenter()
-        VSTDB.frameX = cx - pcx
-        VSTDB.frameY = cy - pcy
+        local point, _, relPoint, x, y = self:GetPoint()
+        VSTDB.pos = { point = point, relPoint = relPoint, x = x, y = y }
     end)
-    frame:SetFrameStrata("MEDIUM")
-    frame:SetFrameLevel(5)
-    frame:SetBackdrop({
-        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 },
-    })
-    frame:SetBackdropColor(0, 0, 0, 0.75)
-    frame:SetBackdropBorderColor(0.4, 0.4, 0.5, 1)
+
+    frame:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Void Shield Tracker", 0.5, 0.7, 1)
+        GameTooltip:AddLine("Drag to move (when unlocked)", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("/vst for options", 0.8, 0.8, 0.8)
+        GameTooltip:Show()
+    end)
+    frame:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- Title
-    local title = frame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    title:SetPoint("TOP", frame, "TOP", 0, -4)
+    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    title:SetPoint("TOP", frame, "TOP", 0, -8)
     title:SetText("VOID SHIELD DECK")
     title:SetTextColor(0.7, 0.7, 0.9)
+    frame.title = title
 
-    -- Icon slots
-    local SLOT_SIZE = 48
-    local SLOT_GAP = 8
-    local totalWidth = SLOT_SIZE * 3 + SLOT_GAP * 2
-
+    -- Cards
+    frame.cards = {}
     for i = 1, 3 do
-        local icon = CreateFrame("Frame", nil, frame)
-        icon:SetSize(SLOT_SIZE, SLOT_SIZE)
+        local card = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+        card:SetSize(CARD_SIZE, CARD_SIZE)
+        local x = -totalCards / 2 + (CARD_SIZE + CARD_GAP) * (i - 1) + CARD_SIZE / 2
+        card:SetPoint("CENTER", frame, "CENTER", x, 2)
+        card:SetBackdrop({
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = 2,
+        })
 
-        local xPos = -totalWidth / 2 + (SLOT_SIZE + SLOT_GAP) * (i - 1) + SLOT_SIZE / 2
-        icon:SetPoint("CENTER", frame, "CENTER", xPos, 0)
+        local bg = card:CreateTexture(nil, "BACKGROUND")
+        bg:SetPoint("TOPLEFT", card, "TOPLEFT", 2, -2)
+        bg:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", -2, 2)
+        card.bg = bg
 
-        local tex = icon:CreateTexture(nil, "ARTWORK")
-        tex:SetAllPoints(icon)
-        tex:SetTexture(TX_EMPTY)
-        tex:SetVertexColor(0.3, 0.3, 0.3, 0.5)
+        local icon = card:CreateTexture(nil, "ARTWORK")
+        icon:SetPoint("TOPLEFT", card, "TOPLEFT", 3, -3)
+        icon:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", -3, 3)
+        icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        card.icon = icon
 
-        local slotBorder = icon:CreateTexture(nil, "OVERLAY")
-        slotBorder:SetAllPoints(icon)
-        slotBorder:SetTexture(0.3, 0.3, 0.4, 0.8)
-
-        ui.icons[i] = { frame = icon, texture = tex }
+        frame.cards[i] = card
     end
 
-    ui.frame = frame
-    DEFAULT_CHAT_FRAME:AddMessage(string.format(
-        "|cffff0000[VST-UI]|r frame created: shown=%s size=%dx%d",
-        tostring(frame:IsShown()), frame:GetWidth(), frame:GetHeight()))
+    -- "Next proc" readout
+    local readout = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    readout:SetPoint("BOTTOM", frame, "BOTTOM", 0, 7)
+    readout:SetText("Next proc: --")
+    frame.readout = readout
 
-    -- Minimap button
+    self.frame = frame
+
     self:CreateMinimapButton()
+    self:CreateOptions()
+    self:UpdateScale()
+end
+
+-- ============================================================
+-- Refresh display from deck state
+-- ============================================================
+function ui:Refresh()
+    local frame = self.frame
+    if not frame then return end
+
+    local s = addon.deck:GetDisplayState()
+    local hr, hg, hb = probColor(s.nextProb)
+
+    for i = 1, 3 do
+        local isHi = (s.highlightSlot == i)
+        renderCard(frame.cards[i], s.cards[i], isHi, hr, hg, hb)
+    end
+
+    -- Readout line
+    if not s.watchSlotOk then
+        frame.readout:SetText("|cffff5555PW:S not on action bar|r")
+    elseif s.nextProb == nil then
+        frame.readout:SetText("|cffff8800Recalibrating...|r")
+    else
+        local pct = math.floor(s.nextProb * 100 + 0.5)
+        local r, g, b = probColor(s.nextProb)
+        local hex = string.format("%02x%02x%02x",
+            math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5), math.floor(b * 255 + 0.5))
+        local thenStr = ""
+        if s.next2Prob then
+            thenStr = string.format("  |cff888888then %d%%|r",
+                math.floor(s.next2Prob * 100 + 0.5))
+        end
+        local calib = s.calibrating and " |cff888888(calibrating)|r" or ""
+        frame.readout:SetText(string.format(
+            "Next proc: |cff%s%d%%|r%s%s", hex, pct, thenStr, calib))
+    end
+
+    -- Title tints cyan when a guaranteed proc is next.
+    if s.nextProb and s.nextProb >= 1.0 then
+        frame.title:SetTextColor(0.2, 0.9, 0.9)
+    else
+        frame.title:SetTextColor(0.7, 0.7, 0.9)
+    end
+end
+
+-- ============================================================
+-- Visibility / scale
+-- ============================================================
+function ui:UpdateVisibility()
+    if not self.frame then return end
+    if addon.isDiscPriest and VSTDB.shown then
+        self.frame:Show()
+    else
+        self.frame:Hide()
+    end
+    if self.minimapButton then
+        if VSTDB.minimap.hide then
+            self.minimapButton:Hide()
+        else
+            self.minimapButton:Show()
+        end
+    end
+end
+
+function ui:UpdateScale()
+    if self.frame then self.frame:SetScale(VSTDB.scale or 1.0) end
+end
+
+function ui:ToggleShown()
+    VSTDB.shown = not VSTDB.shown
+    self:UpdateVisibility()
+end
+
+function ui:ResetPosition()
+    VSTDB.pos = nil
+    self.frame:ClearAllPoints()
+    self.frame:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
 end
 
 -- ============================================================
 -- Minimap button
 -- ============================================================
+local MINIMAP_RADIUS = 80
+
+function ui:UpdateMinimapPosition()
+    local btn = self.minimapButton
+    if not btn then return end
+    local angle = math.rad(VSTDB.minimap.angle or 220)
+    btn:ClearAllPoints()
+    btn:SetPoint("CENTER", Minimap, "CENTER",
+        math.cos(angle) * MINIMAP_RADIUS,
+        math.sin(angle) * MINIMAP_RADIUS)
+end
+
 function ui:CreateMinimapButton()
     local btn = CreateFrame("Button", "VoidShieldTrackerMinimapButton", Minimap)
-    btn:SetSize(32, 32)
-    btn:SetPoint("TOP", Minimap, "TOP", 0, 0)
-    btn:SetFrameStrata("LOW")
-    btn:Hide()
+    btn:SetSize(31, 31)
+    btn:SetFrameStrata("MEDIUM")
+    btn:SetFrameLevel(8)
 
-    btn:SetNormalTexture(TX_PROC)
-    btn:SetPushedTexture(TX_PROC)
-    btn:SetHighlightTexture("Interface\\Buttons\\UI-Minimap-ZoomButton-Highlight")
+    local icon = btn:CreateTexture(nil, "BACKGROUND")
+    icon:SetSize(20, 20)
+    icon:SetPoint("CENTER", btn, "CENTER", 0, 0)
+    icon:SetTexture(TX_PROC)
+    icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
-    btn:SetScript("OnEnter", function()
-        GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Void Shield Tracker", 0.5, 0.7, 1, true)
-        GameTooltip:AddLine("Left-click: Toggle visibility", 0.7, 0.7, 0.7)
-        GameTooltip:AddLine("Right-click: Reset deck & position", 0.7, 0.7, 0.7)
-        GameTooltip:Show()
-    end)
+    local overlay = btn:CreateTexture(nil, "OVERLAY")
+    overlay:SetSize(53, 53)
+    overlay:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, 0)
+    overlay:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
 
-    -- Show frame position reset on right-click
-    ui.frame:SetScript("OnEnter", function()
-        GameTooltip:SetOwner(ui.frame, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Void Shield Tracker", 0.5, 0.7, 1, true)
-        GameTooltip:AddLine("Drag: Move frame", 0.7, 0.7, 0.7)
-        GameTooltip:AddLine("Right-click: Reset position", 0.7, 0.7, 0.7)
-        GameTooltip:Show()
-    end)
-    ui.frame:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
-    btn:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
+    btn:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
 
-    btn:EnableMouse(true)
+    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     btn:RegisterForDrag("LeftButton")
-    btn:SetScript("OnDragStart", btn.StartMoving)
+
+    btn:SetScript("OnDragStart", function(self)
+        self:SetScript("OnUpdate", function()
+            local mx, my = Minimap:GetCenter()
+            local scale  = Minimap:GetEffectiveScale()
+            local px, py = GetCursorPosition()
+            px, py = px / scale, py / scale
+            VSTDB.minimap.angle = math.deg(math.atan2(py - my, px - mx))
+            ui:UpdateMinimapPosition()
+        end)
+    end)
     btn:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        self:ClearAllPoints()
-        self:SetClampRectInsets(5, 5, 5, 5)
-        self:SetClampRectRelativeToCurrentParent()
+        self:SetScript("OnUpdate", nil)
     end)
 
-     btn:SetScript("OnClick", function(self, button)
+    btn:SetScript("OnClick", function(_, button)
         if button == "LeftButton" then
-            if ui.frame:IsShown() then
-                ui.frame:Hide()
-            else
-                ui.frame:Show()
-            end
+            ui:OpenOptions()
         elseif button == "RightButton" then
             addon.deck:Reset()
-            VSTDB = VSTDB or {}
-            VSTDB.frameX = 0
-            VSTDB.frameY = 0
-            ui.frame:ClearAllPoints()
-            ui.frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
             DEFAULT_CHAT_FRAME:AddMessage(
-                "|cff88ccffVoid Shield Tracker|r: Deck reset & frame position cleared",
-                0.5, 0.7, 1)
+                "|cff88ccffVoid Shield Tracker|r: deck reset.", 0.5, 0.7, 1)
         end
     end)
 
-    -- Reset position context menu (right-click on frame)
-    ui.frame:SetScript("OnMouseDown", function(self, button)
-        if button == "RightButton" then
-            -- Reset position to center and clear saved position
-            VSTDB = VSTDB or {}
-            VSTDB.frameX = 0
-            VSTDB.frameY = 0
-            self:ClearAllPoints()
-            self:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-            DEFAULT_CHAT_FRAME:AddMessage(
-                "|cff88ccffVoid Shield Tracker|r: Frame position reset to center",
-                0.5, 0.7, 1)
-        end
+    btn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:AddLine("Void Shield Tracker", 0.5, 0.7, 1)
+        GameTooltip:AddLine("Left-click: options", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("Right-click: reset deck", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("Drag: reposition", 0.8, 0.8, 0.8)
+        GameTooltip:Show()
+    end)
+    btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    self.minimapButton = btn
+    self:UpdateMinimapPosition()
+end
+
+-- ============================================================
+-- Options panel (modern Settings API)
+-- ============================================================
+local function makeCheckbox(parent, label, x, y, getFn, setFn)
+    local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+    cb:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    cb:SetSize(26, 26)
+    local text = cb:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    text:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+    text:SetText(label)
+    cb:SetScript("OnShow", function(self) self:SetChecked(getFn()) end)
+    cb:SetScript("OnClick", function(self) setFn(self:GetChecked()) end)
+    cb:SetChecked(getFn())
+    return cb
+end
+
+local function makeSlider(parent, label, x, y, minV, maxV, step, getFn, setFn, fmt)
+    local slider = CreateFrame("Slider", nil, parent, "UISliderTemplate")
+    slider:SetPoint("TOPLEFT", parent, "TOPLEFT", x + 4, y - 18)
+    slider:SetWidth(220)
+    slider:SetHeight(16)
+    slider:SetOrientation("HORIZONTAL")
+    slider:SetMinMaxValues(minV, maxV)
+    slider:SetValueStep(step)
+    slider:SetObeyStepOnDrag(true)
+
+    local title = slider:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    title:SetPoint("BOTTOMLEFT", slider, "TOPLEFT", 0, 2)
+
+    local function updateLabel(v)
+        title:SetText(label .. ": " .. fmt(v))
+    end
+
+    slider:SetScript("OnValueChanged", function(self, value)
+        updateLabel(value)
+        setFn(value)
+    end)
+    slider:SetScript("OnShow", function(self)
+        self:SetValue(getFn())
+        updateLabel(getFn())
+    end)
+    slider:SetValue(getFn())
+    updateLabel(getFn())
+    return slider
+end
+
+local function makeButton(parent, label, x, y, onClick)
+    local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    b:SetSize(150, 24)
+    b:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    b:SetText(label)
+    b:SetScript("OnClick", onClick)
+    return b
+end
+
+function ui:CreateOptions()
+    if self.optionsPanel then return end
+
+    local panel = CreateFrame("Frame", "VoidShieldTrackerOptionsPanel", UIParent)
+    panel.name = "Void Shield Tracker"
+
+    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("Void Shield Tracker")
+
+    local subtitle = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
+    subtitle:SetText("Tracks the Discipline Priest Void Shield proc deck.")
+
+    local y = -64
+    makeCheckbox(panel, "Show tracker", 16, y,
+        function() return VSTDB.shown end,
+        function(v) VSTDB.shown = v; ui:UpdateVisibility() end)
+
+    y = y - 30
+    makeCheckbox(panel, "Lock frame position", 16, y,
+        function() return VSTDB.locked end,
+        function(v) VSTDB.locked = v end)
+
+    y = y - 30
+    makeCheckbox(panel, "Show minimap button", 16, y,
+        function() return not VSTDB.minimap.hide end,
+        function(v) VSTDB.minimap.hide = not v; ui:UpdateVisibility() end)
+
+    y = y - 30
+    makeCheckbox(panel, "Assume fresh deck on entering an instance", 16, y,
+        function() return VSTDB.pruneOnZone end,
+        function(v) VSTDB.pruneOnZone = v end)
+
+    y = y - 46
+    makeSlider(panel, "Frame scale", 16, y, 0.5, 2.0, 0.05,
+        function() return VSTDB.scale end,
+        function(v) VSTDB.scale = v; ui:UpdateScale() end,
+        function(v) return string.format("%.0f%%", v * 100) end)
+
+    y = y - 56
+    makeSlider(panel, "Proc detection delay", 16, y, 50, 500, 10,
+        function() return VSTDB.procCheckDelayMs end,
+        function(v) VSTDB.procCheckDelayMs = math.floor(v + 0.5) end,
+        function(v) return string.format("%d ms", math.floor(v + 0.5)) end)
+
+    y = y - 60
+    makeButton(panel, "Reset deck", 16, y, function()
+        addon.deck:Reset()
+    end)
+    makeButton(panel, "Reset frame position", 180, y, function()
+        ui:ResetPosition()
     end)
 
-    ui.minimapButton = btn
+    self.optionsPanel = panel
 
-    -- Show minimap button after a short delay (Minimap may not be ready yet)
-    C_Timer.After(0.5, function()
-        btn:Show()
-    end)
+    -- Register with the Settings API (12.0).
+    if Settings and Settings.RegisterCanvasLayoutCategory then
+        local category = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
+        category.ID = "VoidShieldTracker"
+        Settings.RegisterAddOnCategory(category)
+        self.optionsCategory = category
+    end
+end
+
+function ui:OpenOptions()
+    if self.optionsCategory and Settings and Settings.OpenToCategory then
+        Settings.OpenToCategory(self.optionsCategory.ID)
+    elseif InterfaceOptionsFrame_OpenToCategory and self.optionsPanel then
+        InterfaceOptionsFrame_OpenToCategory(self.optionsPanel)
+    end
 end
 
 -- ============================================================
@@ -209,46 +454,23 @@ end
 _G.SLASH_VST1 = "/vst"
 _G.SLASH_VST2 = "/voidshieldtracker"
 _G.SlashCmdList["VST"] = function(msg)
-    if not ui.frame then
-        DEFAULT_CHAT_FRAME:AddMessage(
-            "|cff88ccffVoid Shield Tracker|r: Not ready yet",
-            0.5, 0.7, 1)
-        return
-    end
+    msg = (msg or ""):lower():gsub("^%s*(.-)%s*$", "%1")
+    local function p(t) DEFAULT_CHAT_FRAME:AddMessage("|cff88ccffVoid Shield Tracker|r: " .. t, 0.5, 0.7, 1) end
 
-    msg = msg:lower():gsub("^%s*(.-)%s*$", "%1")
-
-    if msg == "toggle" or msg == "" then
-        if ui.frame:IsShown() then
-            ui.frame:Hide()
-            DEFAULT_CHAT_FRAME:AddMessage(
-                "|cff88ccffVoid Shield Tracker|r: Hidden", 0.5, 0.7, 1)
-        else
-            ui.frame:Show()
-            DEFAULT_CHAT_FRAME:AddMessage(
-                "|cff88ccffVoid Shield Tracker|r: Shown", 0.5, 0.7, 1)
-        end
+    if msg == "" or msg == "options" or msg == "config" then
+        ui:OpenOptions()
+    elseif msg == "toggle" then
+        ui:ToggleShown()
+        p(VSTDB.shown and "shown." or "hidden.")
     elseif msg == "reset" then
         addon.deck:Reset()
-        DEFAULT_CHAT_FRAME:AddMessage(
-            "|cff88ccffVoid Shield Tracker|r: Deck manually reset",
-            0.5, 0.7, 1)
+        p("deck reset.")
     elseif msg == "resetpos" then
-        VSTDB = VSTDB or {}
-        VSTDB.frameX = 0
-        VSTDB.frameY = 0
-        ui.frame:ClearAllPoints()
-        ui.frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-        DEFAULT_CHAT_FRAME:AddMessage(
-            "|cff88ccffVoid Shield Tracker|r: Frame position reset to center",
-            0.5, 0.7, 1)
+        ui:ResetPosition()
+        p("frame position reset.")
     elseif msg == "status" then
-        DEFAULT_CHAT_FRAME:AddMessage(
-            "|cff88ccffVoid Shield Tracker|r: " .. addon.deck:Status(),
-            0.5, 0.7, 1)
+        p(addon.deck:Status())
     else
-        DEFAULT_CHAT_FRAME:AddMessage(
-            "|cff88ccffVoid Shield Tracker|r: Commands: /vst [toggle|reset|status]",
-            0.5, 0.7, 1)
+        p("commands: /vst [options|toggle|reset|resetpos|status]")
     end
 end

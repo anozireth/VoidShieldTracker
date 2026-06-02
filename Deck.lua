@@ -1,16 +1,25 @@
 --[=[
-    Deck.lua - Deck tracking logic for Discipline Priest Void Shield.
+    Deck.lua - Void Shield proc-deck tracking for Discipline Priest.
 
-    Detection: UNIT_SPELLCAST_CHANNEL_START with Penance spell IDs.
-    Reset: proc buff reapplies after 3 casts (detected via UNIT_AURA).
+    Mechanic:
+      The Void Shield proc behaves like a shuffled 3-card deck. Each Penance
+      cast turns over one card; exactly one of the three cards carries the
+      Void Shield proc. When all three cards are turned, the deck reshuffles.
 
-    Spell ID chain (per SimulationCraft / SpellData):
-      47540  base driver cast on enemy (fires CHANNEL_START for offensive)
-      47758  damage channel triggered by 47540
-      47666  per-bolt tick - damage or healing (fires UNIT_SPELLCAST_SUCCEEDED)
-      47757  healing channel cast on friendly (fires CHANNEL_START for healing)
-      47750  per-bolt healing tick (fires UNIT_SPELLCAST_SUCCEEDED)
-    All IDs are matched so any variant that surfaces on CHANNEL_START is caught.
+    Detection (proven approach, shared with VoidShieldHelper):
+      - Penance casts are detected via UNIT_SPELLCAST_CHANNEL_START on matched
+        spell IDs (COMBAT_LOG_EVENT_UNFILTERED is forbidden for addons in 12.0).
+      - The proc itself is read from the Power Word: Shield action-button
+        texture: a different texture (PROC_SLOT_TEXTURE) is shown while the
+        Void Shield proc is up. We snapshot the texture at cast start and again
+        a short delay later to classify each cast.
+
+    Prediction (phase-state filter):
+      We never know which slot of the deck we start observing on, so three
+      candidate phases (deck-start offsets 0/1/2) run in parallel. Casts that
+      violate "at most one proc per 3-card block" invalidate a phase; surviving
+      phases give an honest probability for the next proc. This converges within
+      a few casts and lets the card display align to the true deck boundary.
 ]=]
 
 local addon = _G["VoidShieldTracker"]
@@ -19,57 +28,229 @@ local deck = {}
 addon.deck = deck
 
 -- ============================================================
--- Penance spell IDs to match on UNIT_SPELLCAST_CHANNEL_START
+-- Constants
 -- ============================================================
+
+-- Penance spell IDs matched on UNIT_SPELLCAST_CHANNEL_START.
+--   47540  base driver cast on enemy  (offensive Penance)
+--   47758  damage channel triggered by 47540
+--   47666  per-bolt tick (damage or healing)
+--   47757  healing channel cast on friendly
+--   47750  per-bolt healing tick
 local PENANCE_SPELL_IDS = {
-    [47540] = true,  -- Penance base driver (enemy / offensive)
-    [47758] = true,  -- Penance damage channel
-    [47666] = true,  -- Penance per-bolt tick
-    [47757] = true,  -- Penance healing channel (friendly)
-    [47750] = true,  -- Penance per-bolt healing tick
+    [47540] = true,
+    [47758] = true,
+    [47666] = true,
+    [47757] = true,
+    [47750] = true,
 }
 
--- Power Word: Shield action-button textures for proc detection
--- PROC_SLOT_TEXTURE = proc overlay visible (borrowed time / void shield proc)
--- BASE_SLOT_TEXTURE = normal not-proced PW:S icon
+-- Power Word: Shield action-button textures (fileIDs).
+--   BASE  : normal / not-procced PW:S icon
+--   PROC  : Void Shield proc overlay is up
 local BASE_SLOT_TEXTURE = 135940
 local PROC_SLOT_TEXTURE = 7514191
 
--- PW:S spell IDs to find the action-bar slot
+-- Spell IDs that identify the PW:S button on the action bar.
 local PW_SHIELD_SPELL_IDS = {
-    [17] = true,
-    [1253593] = true,
+    [17]      = true,  -- Power Word: Shield (base)
+    [1253593] = true,  -- Power Word: Shield (Void Shield variant)
 }
 
-local PROC_CHECK_DELAY_MS = 200  -- configurable, default 200ms
+local ACTION_BUTTON_PREFIXES = {
+    "ActionButton",
+    "MultiActionBar1Button",
+    "MultiActionBar2Button",
+    "MultiActionBar3Button",
+    "MultiActionBar4Button",
+}
 
-local DBG = "|cffffaa00[VST-DBG]|r"
+local PROC_CHECK_DELAY_DEFAULT_MS = 200
 
--- ============================================================
--- Deck state
--- ============================================================
-local deckCount
-local marked = {}
-local inDungeon
-local history = {}
-local HISTORY_MAX = 20
-local historyLocked
+-- Result values fed to the predictor.
+local RESULT_PROC    = "proc"
+local RESULT_NOPROC  = "noproc"
+local RESULT_UNKNOWN = "unknown"   -- shield was already up at cast time
 
--- Track whether the proc buff was present on the PREVIOUS aura event.
-local lastBuffPresent = nil
-
--- Debounce: ignore rapid CHANNEL_START events from multi-bolt casts
-local lastCastTime = 0
-local CAST_DEBOUNCE = 0.5
-
--- Detection state (owned by onPenanceCastStart)
-local pendingCheck = false
-local shieldActiveOnCast = false
+local MAX_HISTORY            = 30
+local RECOVERY_REPLAY_WINDOW = 4
 
 -- ============================================================
--- Action bar slot cache for PW:S
+-- Runtime state (module-local)
 -- ============================================================
-local watchSlot = nil
+local penanceHistory      = {}     -- newest first; values: "proc"/"noproc"/"unknown"
+local predictor                    -- phase-state filter (built in Initialize)
+local predictorHistoryDepth = 0    -- history entries the current predictor has seen
+local predictorBreakCount   = 0
+
+local watchSlot           = nil    -- cached PW:S action-bar slot
+local slotRefreshCountdown = 0
+local shieldActive        = false  -- true when PROC_SLOT_TEXTURE is visible
+
+-- Per-cast detection state.
+local pendingCheck        = false
+local shieldActiveOnCast  = false
+
+-- ============================================================
+-- Phase-state filter
+-- ============================================================
+local function Predictor_new()
+    -- offset N => first observed cast sits at slot N of a block. Casts before
+    -- tracking began are injected as virtual unknowns so partial blocks resolve.
+    local phases = {}
+    for offset = 0, 2 do
+        local v = (3 - offset) % 3
+        phases[offset + 1] = {
+            isValid     = true,
+            minSum      = 0,
+            maxSum      = v,
+            slotsFilled = v,
+        }
+    end
+    return { phases = phases }
+end
+
+local function Predictor_update(self, val)
+    -- val: 1 = proc, 0 = no-proc, -1 = unknown
+    for _, p in ipairs(self.phases) do
+        if p.isValid then
+            if val == 1 then
+                p.minSum = p.minSum + 1
+                p.maxSum = p.maxSum + 1
+            elseif val == -1 then
+                p.maxSum = p.maxSum + 1
+            end
+
+            if p.minSum > 1 then
+                p.isValid = false
+            elseif p.slotsFilled == 2 then
+                if p.maxSum == 0 then
+                    p.isValid = false
+                end
+                p.minSum, p.maxSum, p.slotsFilled = 0, 0, 0
+            else
+                p.slotsFilled = p.slotsFilled + 1
+            end
+        end
+    end
+end
+
+-- Probability that the NEXT cast is a proc, averaged over valid phases.
+-- Returns nil if every phase has been invalidated.
+local function Predictor_getProb(self)
+    local valid = {}
+    for _, p in ipairs(self.phases) do
+        if p.isValid then valid[#valid + 1] = p end
+    end
+    if #valid == 0 then return nil, 0 end
+
+    local total = 0
+    for _, p in ipairs(valid) do
+        local probPhi
+        if p.minSum == 1 then
+            probPhi = 0
+        else
+            local numUnknowns = p.maxSum - p.minSum
+            local remaining   = 3 - p.slotsFilled
+            probPhi = 1.0 / (numUnknowns + remaining)
+        end
+        total = total + probPhi
+    end
+    return total / #valid, #valid
+end
+
+local function probForState(sf, minS, maxS)
+    if minS == 1 then return 0 end
+    return 1.0 / ((maxS - minS) + (3 - sf))
+end
+
+local function advanceState(sf, minS, maxS, val)
+    local newMin = minS + (val == 1 and 1 or 0)
+    local newMax = maxS + (val == 1 and 1 or 0)
+    if newMin > 1 then return 0, 0, 0, false end
+    if sf == 2 then
+        if newMax == 0 then return 0, 0, 0, false end
+        return 0, 0, 0, true
+    end
+    return sf + 1, newMin, newMax, true
+end
+
+-- Probability the cast AFTER next is a proc (one-step lookahead).
+local function Predictor_getProbNextNext(self)
+    local valid = {}
+    for _, p in ipairs(self.phases) do
+        if p.isValid then valid[#valid + 1] = p end
+    end
+    if #valid == 0 then return nil end
+
+    local total = 0
+    for _, p in ipairs(valid) do
+        local sf, minS, maxS = p.slotsFilled, p.minSum, p.maxSum
+        local p1 = probForState(sf, minS, maxS)
+        local p0 = 1 - p1
+        local prob2 = 0
+        if p1 > 0 then
+            local s, mn, mx, ok = advanceState(sf, minS, maxS, 1)
+            if ok then prob2 = prob2 + p1 * probForState(s, mn, mx) end
+        end
+        if p0 > 0 then
+            local s, mn, mx, ok = advanceState(sf, minS, maxS, 0)
+            if ok then prob2 = prob2 + p0 * probForState(s, mn, mx) end
+        end
+        total = total + prob2
+    end
+    return total / #valid
+end
+
+-- Keep only the offset-0 phase (assume a clean deck boundary). Used on
+-- instance entry when the "fresh deck on zone" option is enabled.
+local function Predictor_pruneToOffset0(self)
+    for i, p in ipairs(self.phases) do
+        if i == 1 then
+            p.isValid, p.minSum, p.maxSum, p.slotsFilled = true, 0, 0, 0
+        else
+            p.isValid = false
+        end
+    end
+end
+
+-- Offset (0/1/2) of the sole surviving phase, or nil if not converged.
+local function convergedOffset()
+    local found, count = nil, 0
+    for idx, p in ipairs(predictor.phases) do
+        if p.isValid then
+            count = count + 1
+            found = idx - 1
+        end
+    end
+    if count == 1 then return found end
+    return nil
+end
+
+-- ============================================================
+-- Action-bar texture scanning
+-- ============================================================
+local function scanBarTexture()
+    for _, prefix in ipairs(ACTION_BUTTON_PREFIXES) do
+        for i = 1, 12 do
+            local btn = _G[prefix .. i]
+            if btn and btn.icon then
+                local tex = btn.icon:GetTexture()
+                if tex == PROC_SLOT_TEXTURE then return PROC_SLOT_TEXTURE end
+                if tex == BASE_SLOT_TEXTURE  then return BASE_SLOT_TEXTURE  end
+            end
+        end
+    end
+end
+
+local function getCurrentSlotTexture()
+    if watchSlot then
+        local tex = GetActionTexture(watchSlot)
+        if tex then return tex end
+    end
+    return scanBarTexture()
+end
+
 local function refreshWatchSlot()
     for slot = 1, 180 do
         local actionType, id = GetActionInfo(slot)
@@ -81,284 +262,217 @@ local function refreshWatchSlot()
     watchSlot = nil
 end
 
--- Get current PW:S button texture, preferring cached slot
-local function getShieldTexture()
-    if watchSlot then
-        local tex = GetActionTexture(watchSlot)
-        if tex then return tex end
-    end
-    -- Fallback: scan action bars
-    local prefixes = {"ActionButton", "MultiActionBar1Button", "MultiActionBar2Button", "MultiActionBar3Button", "MultiActionBar4Button"}
-    for _, prefix in ipairs(prefixes) do
-        for i = 1, 12 do
-            local btn = _G[prefix .. i]
-            if btn and btn.icon then
-                local tex = btn.icon:GetTexture()
-                if tex == PROC_SLOT_TEXTURE or tex == BASE_SLOT_TEXTURE then
-                    return tex
-                end
-            end
-        end
-    end
-    return nil
-end
-
--- Update shieldActive from current button texture
 local function pollShieldState()
-    local tex = getShieldTexture()
+    local tex = getCurrentSlotTexture()
     if tex == PROC_SLOT_TEXTURE then
-        pendingCheck = false
+        shieldActive = true
     elseif tex == BASE_SLOT_TEXTURE then
+        shieldActive = false
+    end
+    -- nil/unknown texture: keep last known state
+end
+
+local function getProcCheckDelay()
+    local db = VSTDB
+    local ms = (db and db.procCheckDelayMs) or PROC_CHECK_DELAY_DEFAULT_MS
+    return ms / 1000
+end
+
+-- ============================================================
+-- Result recording
+-- ============================================================
+local function refreshUI()
+    if addon.ui and addon.ui.Refresh then addon.ui:Refresh() end
+end
+
+local function recordResult(result)
+    table.insert(penanceHistory, 1, result)
+    if #penanceHistory > MAX_HISTORY then
+        penanceHistory[#penanceHistory] = nil
+    end
+
+    local val = (result == RESULT_PROC and 1)
+             or (result == RESULT_NOPROC and 0)
+             or -1
+    predictorHistoryDepth = math.min(predictorHistoryDepth + 1, MAX_HISTORY)
+    Predictor_update(predictor, val)
+
+    -- Auto-recover if the observed sequence broke every phase.
+    if Predictor_getProb(predictor) == nil then
+        predictorBreakCount = predictorBreakCount + 1
+        predictor = Predictor_new()
+        local replayN = math.min(#penanceHistory, RECOVERY_REPLAY_WINDOW)
+        for j = replayN, 1, -1 do
+            local rv = (penanceHistory[j] == RESULT_PROC and 1)
+                    or (penanceHistory[j] == RESULT_NOPROC and 0)
+                    or -1
+            Predictor_update(predictor, rv)
+        end
+        predictorHistoryDepth = replayN
+    end
+
+    refreshUI()
+end
+
+-- ============================================================
+-- Penance cast handling (UNIT_SPELLCAST_CHANNEL_START)
+-- ============================================================
+function deck:OnPenanceCast(spellID)
+    if not PENANCE_SPELL_IDS[spellID] then return end
+
+    if pendingCheck then
+        -- A previous cast's timer is still live: force-complete it so history
+        -- stays contiguous on a fast recast inside the delay window.
         pendingCheck = false
-    end
-    -- If tex is nil, keep last state
-end
-
-local function GetGameTime()
-    local t = GetTime()
-    if t and t > 1000000 then
-        local gameStart = 1717200000
-        return t - gameStart
-    end
-    return t
-end
-
--- ============================================================
--- Initialization
--- ============================================================
-function deck:Initialize()
-    deckCount = 0
-    lastBuffPresent = nil
-    lastCastTime = 0
-    inDungeon = false
-    history = {}
-    historyLocked = false
-    for i = 1, 3 do marked[i] = false end
-    addon.SafeSetAllIcons(addon.ui, "empty")
-    refreshWatchSlot()
-    DEFAULT_CHAT_FRAME:AddMessage(string.format(
-        "%s INIT: watchSlot=%d ui=%s",
-        DBG, watchSlot and watchSlot or "nil", tostring(addon.ui)))
-end
-
--- ============================================================
--- Deck operations
--- ============================================================
-local function ResetDeck()
-    deckCount = 0
-    lastCastTime = 0
-    for i = 1, 3 do marked[i] = false end
-    addon.SafeSetAllIcons(addon.ui, "empty")
-end
-
--- ============================================================
--- Smart detection (outside dungeons)
--- ============================================================
-local function CheckSmartDetection()
-    if historyLocked then return end
-    if #history < 6 then return end
-
-    local n = #history
-
-    -- Pattern 1: Two procs in a row -> boundary between them
-    for i = 2, n do
-        if history[i] == 1 and history[i - 1] == 1 then
-            local castsAfterBoundary = n - i
-            deckCount = 1 + castsAfterBoundary
-            if deckCount > 3 then
-                deckCount = ((deckCount - 1) % 3) + 1
-            end
-
-            for j = 1, 3 do marked[j] = false end
-            for j = 1, deckCount do
-                local histIdx = i + j - 1
-                if histIdx <= n then
-                    addon.SafeSetIcon(addon.ui, j, history[histIdx] == 1 and "proc" or "noproc")
-                    marked[j] = true
-                end
-            end
-            historyLocked = true
-            DEFAULT_CHAT_FRAME:AddMessage(
-                "|cff88ccffVoid Shield Tracker|r: Deck boundary detected (consecutive procs)",
-                0.5, 0.7, 1)
-            return
+        pollShieldState()
+        if shieldActiveOnCast then
+            recordResult(RESULT_UNKNOWN)
+        elseif shieldActive then
+            recordResult(RESULT_PROC)
+        else
+            recordResult(RESULT_NOPROC)
         end
     end
 
-    -- Pattern 2: Four non-procs in a row -> boundary after the 2nd
-    for i = 4, n do
-        if history[i] == 0 and history[i-1] == 0 and
-           history[i-2] == 0 and history[i-3] == 0 then
-            local boundaryPos = i - 1
-            local castsFromBoundary = n - boundaryPos + 1
-            deckCount = castsFromBoundary
-            if deckCount > 3 then
-                deckCount = ((deckCount - 1) % 3) + 1
-            end
-
-            for j = 1, 3 do marked[j] = false end
-            for j = 1, deckCount do
-                local histIdx = boundaryPos + j - 1
-                if histIdx <= n then
-                    addon.SafeSetIcon(addon.ui, j, history[histIdx] == 1 and "proc" or "noproc")
-                    marked[j] = true
-                end
-            end
-            historyLocked = true
-            DEFAULT_CHAT_FRAME:AddMessage(
-                "|cff88ccffVoid Shield Tracker|r: Deck boundary detected (4 non-procs)",
-                0.5, 0.7, 1)
-            return
-        end
-    end
-end
-
--- ============================================================
--- Penance channel detection (called from UNIT_SPELLCAST_CHANNEL_START)
--- ============================================================
-function deck:OnPenanceChannel(spellID, spellName)
-    DEFAULT_CHAT_FRAME:AddMessage(string.format(
-        "%s PENCE CHANNEL_START: spellID=%d name=%s",
-        DBG, spellID, spellName or "(none)"))
-
-    -- Debounce check
-    local now = GetGameTime()
-    local debounceGap = now - lastCastTime
-    if debounceGap < CAST_DEBOUNCE then
-        DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            "%s   DEBOUNCE SKIP (%.3f < %.3f)", DBG, debounceGap, CAST_DEBOUNCE))
-        return
-    end
-
-    -- Start proc detection via action button texture
-    pendingCheck = true
-    shieldActiveOnCast = (getShieldTexture() == PROC_SLOT_TEXTURE)
-    DEFAULT_CHAT_FRAME:AddMessage(string.format(
-        "%s   shieldActiveOnCast=%s", DBG, tostring(shieldActiveOnCast)))
     pollShieldState()
+    shieldActiveOnCast = shieldActive
+    pendingCheck = true
 
-    C_Timer.After(PROC_CHECK_DELAY_MS / 1000, function()
+    C_Timer.After(getProcCheckDelay(), function()
         if not pendingCheck then return end
         pendingCheck = false
-
-        local tex = getShieldTexture()
-        local result = "NO_PROC"
+        pollShieldState()
         if shieldActiveOnCast then
-            result = "PROC"
-        elseif tex == PROC_SLOT_TEXTURE then
-            result = "PROC"
-        end
-
-        DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            "%s   RESULT=%s (tex=%s, prev=%s)", DBG, result, tostring(tex), tostring(shieldActiveOnCast)))
-
-        lastCastTime = now
-        deckCount = deckCount + 1
-        addon.SafeSetIcon(addon.ui, deckCount, result == "PROC" and "proc" or "noproc")
-        marked[deckCount] = true
-        history[#history + 1] = result == "PROC" and 1 or 0
-        if #history > HISTORY_MAX then table.remove(history, 1) end
-
-        DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            "%s   deckCount=%d/3 history=[%s]",
-            DBG, deckCount, table.concat(history, ",")))
-
-        if deckCount >= 3 then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                "%s   DECK FULL (3) - scheduling 1s reset", DBG))
-            C_Timer.After(1, function()
-                DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                    "%s   RESET TIMER FIRED", DBG))
-                ResetDeck()
-            end)
-        end
-
-        if not inDungeon and not historyLocked then
-            CheckSmartDetection()
+            recordResult(RESULT_UNKNOWN)
+        elseif shieldActive then
+            recordResult(RESULT_PROC)
+        else
+            recordResult(RESULT_NOPROC)
         end
     end)
+
+    refreshUI()
 end
 
 -- ============================================================
--- Aura check (UNIT_AURA event on "player")
--- Used only for proc buff reapplied detection (deck reset)
+-- Periodic tick (called by Core's ticker, ~10/s)
+-- Returns true if the display should be refreshed.
 -- ============================================================
-function deck:OnPlayerAura()
-    -- Check if Master the Darkness buff reapplied (deck reset)
-    local hasBuff = false
-    local ok, result = pcall(C_UnitAuras.GetUnitAuras, "player", "HELPFUL")
-    if ok and result then
-        for i = 1, #result do
-            local a = result[i]
-            if a.spellID == 1253591 or a.name == "Master the Darkness" then
-                hasBuff = true
-                break
+function deck:Tick()
+    slotRefreshCountdown = slotRefreshCountdown - 1
+    if slotRefreshCountdown <= 0 then
+        refreshWatchSlot()
+        slotRefreshCountdown = 10  -- ~once per second
+    end
+    local prev = shieldActive
+    pollShieldState()
+    return shieldActive ~= prev
+end
+
+-- ============================================================
+-- Reset / lifecycle
+-- ============================================================
+function deck:Initialize()
+    penanceHistory        = {}
+    predictor             = Predictor_new()
+    predictorHistoryDepth = 0
+    predictorBreakCount   = 0
+    shieldActive          = false
+    pendingCheck          = false
+    shieldActiveOnCast    = false
+    watchSlot             = nil
+    slotRefreshCountdown  = 0
+    refreshWatchSlot()
+end
+
+function deck:Reset()
+    self:Initialize()
+    refreshUI()
+end
+
+-- Instance entry: the deck reshuffles, so reset (or prune to a clean boundary).
+function deck:OnEnterWorld()
+    local db = VSTDB
+    if db and db.pruneOnZone and predictor then
+        Predictor_pruneToOffset0(predictor)
+        penanceHistory        = {}
+        predictorHistoryDepth = 0
+        predictorBreakCount   = 0
+        pendingCheck          = false
+        shieldActiveOnCast    = false
+        shieldActive          = false
+    else
+        self:Initialize()
+    end
+    refreshWatchSlot()
+    refreshUI()
+end
+
+-- ============================================================
+-- Display state for the UI
+-- ============================================================
+-- Returns a table describing the current deck cycle:
+--   cards        : { [1..3] = "proc"|"noproc"|"unknown"|"future" }
+--   highlightSlot: 1-3 slot index the NEXT cast will reveal (nil if block done)
+--   nextProb     : probability next cast is a proc (0..1, or nil)
+--   next2Prob    : probability the cast after next is a proc (0..1, or nil)
+--   procFound    : true if the proc has already turned up this block
+--   calibrating  : true while >1 phase is still possible (alignment unsure)
+--   watchSlotOk  : true if PW:S was found on the action bar
+function deck:GetDisplayState()
+    local off = convergedOffset()
+    local calibrating = (off == nil)
+    local v = (3 - (off or 0)) % 3
+
+    local cards = { "future", "future", "future" }
+    local n = math.min(#penanceHistory, predictorHistoryDepth)
+    local currentSlot0  -- 0-based slot of the newest cast within its block
+    local procFound = false
+
+    if n > 0 then
+        local absNew = (n - 1) + v
+        local currentBlock = math.floor(absNew / 3)
+        currentSlot0 = absNew % 3
+
+        for i = 1, n do
+            local abs = (n - i) + v
+            if math.floor(abs / 3) == currentBlock then
+                local slot0 = abs % 3
+                local r = penanceHistory[i]
+                cards[slot0 + 1] = r
+                if r == RESULT_PROC then procFound = true end
             end
         end
     end
 
-    if hasBuff and deckCount > 0 then
-        DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            "%s RESET: proc buff reapplied, resetting deck from %d", DBG, deckCount))
-        ResetDeck()
-    end
-end
-
--- ============================================================
--- Dungeon detection
--- ============================================================
-function deck:CheckDungeonState()
-    local wasDungeon = inDungeon
-
-    inDungeon = false
-    if C_GossipInfo and C_GossipInfo.GetPOIData and C_GossipInfo.GetPOIData() then
-        inDungeon = true
-    end
-    if C_MythicPlus and C_MythicPlus.GetMapState and C_MythicPlus.GetMapState() then
-        inDungeon = true
-    end
-    if IsInGroup(LE_PARTY_CATEGORY_HOME) then
-        inDungeon = true
+    -- Slot the next cast will fill. If the block is complete, the next cast
+    -- starts a fresh deck (no current-block highlight).
+    local highlightSlot
+    if currentSlot0 == nil then
+        highlightSlot = 1
+    elseif currentSlot0 >= 2 then
+        highlightSlot = nil
+    else
+        highlightSlot = currentSlot0 + 2  -- (slot0+1) is current, +2 in 1-based is next
     end
 
-    if inDungeon and not wasDungeon then
-        ResetDeck()
-        historyLocked = false
-        history = {}
-        DEFAULT_CHAT_FRAME:AddMessage(
-            "|cff88ccffVoid Shield Tracker|r: Dungeon detected - deck reset",
-            0.5, 0.7, 1)
-    elseif not inDungeon and wasDungeon then
-        historyLocked = false
-        history = {}
-    end
-end
-
-function deck:OnEnterWorld()
-    local isInstance, instanceType = IsInInstance()
-    if instanceType == "party" or instanceType == "raid" or instanceType == "scenario" then
-        inDungeon = true
-        ResetDeck()
-        historyLocked = false
-        history = {}
-        DEFAULT_CHAT_FRAME:AddMessage(
-            "|cff88ccffVoid Shield Tracker|r: Entered instance - deck reset",
-            0.5, 0.7, 1)
-    end
-end
-
--- ============================================================
--- Public API for slash commands
--- ============================================================
-function deck:Reset()
-    ResetDeck()
-    historyLocked = false
-    history = {}
+    return {
+        cards         = cards,
+        highlightSlot = highlightSlot,
+        nextProb      = Predictor_getProb(predictor),
+        next2Prob     = Predictor_getProbNextNext(predictor),
+        procFound     = procFound,
+        calibrating   = calibrating,
+        watchSlotOk   = (watchSlot ~= nil),
+        shieldActive  = shieldActive,
+    }
 end
 
 function deck:Status()
+    local prob, count = Predictor_getProb(predictor)
     return string.format(
-        "Deck: %d/3 | Dungeon: %s | Smart locked: %s | History: %d",
-        deckCount, inDungeon and "yes" or "no",
-        historyLocked and "yes" or "no", #history)
+        "Next proc: %s | phases: %d | history: %d | resets: %d | PW:S slot: %s",
+        prob and string.format("%d%%", math.floor(prob * 100 + 0.5)) or "?",
+        count or 0, #penanceHistory, predictorBreakCount,
+        watchSlot and tostring(watchSlot) or "not found")
 end

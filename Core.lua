@@ -1,149 +1,158 @@
 --[[
-Core.lua - Addon core: namespace, event dispatch, initialization.
-Loaded FIRST (top of TOC). Creates the shared addon namespace table
-and the event frame at module load time.
+    Core.lua - Addon namespace, saved variables, event dispatch, lifecycle.
+    Loaded first. Creates the shared addon table and the single event frame.
 
-WoW 12.0: COMBAT_LOG_EVENT_UNFILTERED registration is forbidden
-for addons (triggers ADDON_ACTION_FORBIDDEN). We detect Penance casts
-via the "Master the Darkness" proc buff in UNIT_AURA instead.
+    WoW 12.0 note: COMBAT_LOG_EVENT_UNFILTERED is forbidden for addons. Penance
+    casts are detected via UNIT_SPELLCAST_CHANNEL_START instead (see Deck.lua).
 ]]
 
 local addonName = ...
 
--- Shared addon table (global so other files see the same table via ...)
+-- Shared addon table (global so Deck.lua / UI.lua reference the same table).
 local addon = _G[addonName] or {}
 _G[addonName] = addon
 
--- ============================================================
--- State (populated by submodules)
--- ============================================================
-addon.deck = nil    -- populated by Deck.lua
-addon.ui = nil      -- populated by UI.lua
+addon.name = addonName
 addon.initialized = false
+addon.isDiscPriest = false
 
 -- ============================================================
--- Event frame (anonymous - avoids action security issues)
+-- Saved-variable defaults
 -- ============================================================
-local eventFrame = CreateFrame("Frame")
-local EVENT_LIST = {
-    "ADDON_LOADED",
-    "PLAYER_LOGIN",
-    "UNIT_SPELLCAST_CHANNEL_START",
-    "UNIT_AURA",
-    "GROUP_ROSTER_UPDATE",
-    "PLAYER_ENTERING_WORLD",
+local DB_DEFAULTS = {
+    shown            = true,
+    locked           = false,
+    scale            = 1.0,
+    procCheckDelayMs = 200,
+    pruneOnZone      = true,   -- assume a fresh deck when entering an instance
+    minimap          = { hide = false, angle = 220 },
 }
-local eventHandlers = {}
 
--- ============================================================
--- Taint-safe icon helpers (methods on addon - shared across modules)
--- ============================================================
-addon.SafeTableIndex = function(t, key)
-    local ok, v = pcall(function() return t[key] end)
-    return ok and v
-end
-
-addon.SafeSetIcon = function(ui, slot, state)
-    if not ui then return end
-    local icons = addon.SafeTableIndex(ui, "icons")
-    if not icons or not icons[slot] then return end
-    local tex = addon.SafeTableIndex(icons[slot], "texture")
-    if not tex then return end
-
-    local TX_EMPTY = "Interface\\Buttons\\UI-EmptySlot"
-    local TX_PROC    = "Interface\\Icons\\Inv12_apextalent_priest_voidshield"
-    local TX_NOPROC  = "Interface\\Icons\\spell_holy_penance"
-
-    if state == "empty" then
-        tex:SetTexture(TX_EMPTY)
-        tex:SetVertexColor(0.3, 0.3, 0.3, 0.5)
-    elseif state == "proc" then
-        tex:SetTexture(TX_PROC)
-        tex:SetVertexColor(0.4, 0.9, 0.4, 1)
-    elseif state == "noproc" then
-        tex:SetTexture(TX_NOPROC)
-        tex:SetVertexColor(0.9, 0.2, 0.2, 1)
-    end
-end
-
-addon.SafeSetAllIcons = function(ui, state)
-    for i = 1, 3 do
-        addon.SafeSetIcon(ui, i, state)
-    end
-end
-
-eventHandlers["ADDON_LOADED"] = function(self, event, loadedName)
-    if loadedName == addonName then
-        playerGUID = nil
-    end
-end
-
-local eventFrame = CreateFrame("Frame")
-for e, _ in pairs(eventHandlers) do
-    eventFrame:RegisterEvent(e)
-end
-
-eventFrame:SetScript("OnEvent", function(self, event, ...)
-    local h = eventHandlers[event]
-    if h then h(...) end
-end)
-
--- ============================================================
--- Initialization entry point (called from PLAYER_LOGIN event)
--- ============================================================
-function addon:OnLogin()
-    -- Build UI FIRST (so OnPlayerAura has addon.ui available during init)
-    self.ui:Create()
-
-    -- Initialize deck state
-    self.deck:Initialize()
-
-    -- NOW define event handlers (after all modules loaded)
-    eventHandlers["PLAYER_LOGIN"] = function()
-        addon.initialized = true
-    end
-    eventHandlers["UNIT_SPELLCAST_CHANNEL_START"] = function(unit, castID, spellID, spellName, castTime)
-        if addon.initialized and unit == "player" and addon.deck and addon.deck.OnPenanceChannel then
-            addon.deck:OnPenanceChannel(spellID, spellName)
+local function applyDefaults(db, defaults)
+    for k, v in pairs(defaults) do
+        if type(v) == "table" then
+            if type(db[k]) ~= "table" then db[k] = {} end
+            applyDefaults(db[k], v)
+        elseif db[k] == nil then
+            db[k] = v
         end
     end
-    eventHandlers["UNIT_AURA"] = function(unit)
-        if addon.initialized and unit == "player" and addon.deck and addon.deck.OnPlayerAura then
-            addon.deck:OnPlayerAura()
-        end
-    end
-    eventHandlers["GROUP_ROSTER_UPDATE"] = function()
-        if addon.initialized and addon.deck and addon.deck.CheckDungeonState then
-            addon.deck:CheckDungeonState()
-        end
-    end
-    eventHandlers["PLAYER_ENTERING_WORLD"] = function()
-        if addon.initialized and addon.deck and addon.deck.OnEnterWorld then
-            addon.deck:OnEnterWorld()
-        end
-    end
+end
 
-    -- Restore saved position
-    local db = VSTDB or {}
-    if db.frameX and db.frameY then
-        local f = self.ui.frame
-        f:ClearAllPoints()
-        f:SetPoint("CENTER", UIParent, "CENTER", db.frameX, db.frameY)
+-- ============================================================
+-- Spec detection (Discipline Priest only)
+-- ============================================================
+local function updateSpecState()
+    local _, class = UnitClass("player")
+    local spec = GetSpecialization and GetSpecialization()
+    addon.isDiscPriest = (class == "PRIEST" and spec == 1)
+end
+
+-- ============================================================
+-- Ticker (drives action-bar polling + shield-state refresh)
+-- ============================================================
+local ticker
+
+local function startTicker()
+    if ticker then return end
+    ticker = C_Timer.NewTicker(0.1, function()
+        if addon.deck and addon.deck.Tick then
+            local changed = addon.deck:Tick()
+            if changed and addon.ui and addon.ui.Refresh then
+                addon.ui:Refresh()
+            end
+        end
+    end)
+end
+
+local function stopTicker()
+    if ticker then
+        ticker:Cancel()
+        ticker = nil
     end
+end
 
-    -- Check initial dungeon state
-    self.deck:CheckDungeonState()
+-- Show/hide and start/stop based on spec + user preference.
+function addon:UpdateActiveState()
+    local active = self.isDiscPriest
+    if active then
+        startTicker()
+    else
+        stopTicker()
+    end
+    if self.ui and self.ui.UpdateVisibility then
+        self.ui:UpdateVisibility()
+    end
+end
 
-    -- Show
-    self.ui.frame:Show()
+-- ============================================================
+-- Initialization (PLAYER_LOGIN)
+-- ============================================================
+local function onLogin()
+    if addon.initialized then return end
+
+    VSTDB = VSTDB or {}
+    applyDefaults(VSTDB, DB_DEFAULTS)
+
+    addon.ui:Create()
+    addon.deck:Initialize()
+    updateSpecState()
+
+    addon.initialized = true
+
+    addon:UpdateActiveState()
+    addon.ui:Refresh()
+
     DEFAULT_CHAT_FRAME:AddMessage(
-        "|cff88ccffVoid Shield Tracker|r: Loaded (use /vst for commands)",
+        "|cff88ccffVoid Shield Tracker|r loaded. Type |cffffd100/vst|r for options.",
         0.5, 0.7, 1)
-    local f = self.ui.frame
-    local numPoints = f:GetNumPoints()
-    DEFAULT_CHAT_FRAME:AddMessage(
-        "|cff88ccffVST|r: shown=" .. tostring(f:IsShown())
-        .. " size=" .. tostring(f:GetWidth()) .. "x" .. tostring(f:GetHeight())
-        .. " strata=" .. tostring(f:GetFrameStrata())
-        .. " numAnchors=" .. tostring(numPoints))
 end
+
+-- ============================================================
+-- Event frame
+-- ============================================================
+local eventFrame = CreateFrame("Frame")
+eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+eventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
+eventFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
+eventFrame:RegisterEvent("UNIT_SPELLCAST_CHANNEL_START")
+eventFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+
+eventFrame:SetScript("OnEvent", function(_, event, ...)
+    if event == "PLAYER_LOGIN" then
+        onLogin()
+
+    elseif not addon.initialized then
+        return
+
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        updateSpecState()
+        addon.deck:OnEnterWorld()
+        addon:UpdateActiveState()
+
+    elseif event == "PLAYER_SPECIALIZATION_CHANGED"
+        or event == "PLAYER_TALENT_UPDATE"
+        or event == "TRAIT_CONFIG_UPDATED" then
+        local unit = ...
+        if event == "PLAYER_SPECIALIZATION_CHANGED" and unit ~= "player" then
+            return
+        end
+        updateSpecState()
+        addon.deck:Reset()
+        addon:UpdateActiveState()
+
+    elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
+        if not addon.isDiscPriest then return end
+        local unit, _, spellID = ...
+        if unit == "player" then
+            addon.deck:OnPenanceCast(spellID)
+        end
+
+    elseif event == "ACTIONBAR_SLOT_CHANGED" then
+        if addon.deck and addon.deck.Tick then
+            addon.deck:Tick()
+        end
+    end
+end)
