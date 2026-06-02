@@ -93,7 +93,12 @@ eventHandlers["PLAYER_ENTERING_WORLD"] = function()
 end
 eventHandlers["UNIT_SPELLCAST_CHANNEL_START"] = function(unit, castID, spellID, spellName, castTime)
     if addon.initialized and unit == "player" then
-        addon.deck:OnPenanceChannel(spellID, spellName)
+        DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[VST-EVENT]|r CHANNEL_START: spellID=" .. tostring(spellID))
+        if addon.deck and addon.deck.OnPenanceChannel then
+            addon.deck:OnPenanceChannel(spellID, spellName)
+        else
+            DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[VST-EVENT]|r deck or OnPenanceChannel is nil")
+        end
     end
 end
 

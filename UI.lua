@@ -105,6 +105,9 @@ function ui:Create()
     end
 
     ui.frame = frame
+    DEFAULT_CHAT_FRAME:AddMessage(string.format(
+        "|cffff0000[VST-UI]|r frame created: shown=%s size=%dx%d",
+        tostring(frame:IsShown()), frame:GetWidth(), frame:GetHeight()))
 
     -- Minimap button
     self:CreateMinimapButton()
