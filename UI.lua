@@ -58,8 +58,10 @@ function ui:Create()
     frame:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
         VSTDB = VSTDB or {}
-        VSTDB.frameX = self:GetCenter() - UIParent:GetCenter()
-        VSTDB.frameY = self:GetTop() - UIParent:GetTop()
+        local cx, cy = self:GetCenter()
+        local pcx, pcy = UIParent:GetCenter()
+        VSTDB.frameX = cx - pcx
+        VSTDB.frameY = cy - pcy
     end)
     frame:SetFrameStrata("MEDIUM")
     frame:SetFrameLevel(5)
