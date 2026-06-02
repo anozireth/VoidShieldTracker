@@ -35,23 +35,23 @@ local EVENT_LIST = {
 local eventHandlers = {}
 
 -- ============================================================
--- Taint-safe icon helpers (shared across modules)
+-- Taint-safe icon helpers (methods on addon — shared across modules)
 -- ============================================================
-local TX_PROC    = "Interface\\Icons\\Inv12_apextalent_priest_voidshield"
-local TX_NOPROC  = "Interface\\Icons\\spell_holy_penance"
-local TX_EMPTY   = "Interface\\Buttons\\UI-EmptySlot"
-
-local function SafeTableIndex(t, key)
+addon.SafeTableIndex = function(t, key)
     local ok, v = pcall(function() return t[key] end)
     return ok and v
 end
 
-local function SafeSetIcon(ui, slot, state)
+addon.SafeSetIcon = function(ui, slot, state)
     if not ui then return end
-    local icons = SafeTableIndex(ui, "icons")
+    local icons = addon.SafeTableIndex(ui, "icons")
     if not icons or not icons[slot] then return end
-    local tex = SafeTableIndex(icons[slot], "texture")
+    local tex = addon.SafeTableIndex(icons[slot], "texture")
     if not tex then return end
+
+    local TX_EMPTY = "Interface\\Buttons\\UI-EmptySlot"
+    local TX_PROC    = "Interface\\Icons\\Inv12_apextalent_priest_voidshield"
+    local TX_NOPROC  = "Interface\\Icons\\spell_holy_penance"
 
     if state == "empty" then
         tex:SetTexture(TX_EMPTY)
@@ -65,9 +65,9 @@ local function SafeSetIcon(ui, slot, state)
     end
 end
 
-local function SafeSetAllIcons(ui, state)
+addon.SafeSetAllIcons = function(ui, state)
     for i = 1, 3 do
-        SafeSetIcon(ui, i, state)
+        addon.SafeSetIcon(ui, i, state)
     end
 end
 
