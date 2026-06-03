@@ -294,13 +294,40 @@ local function refreshUI()
     if addon.ui and addon.ui.Refresh then addon.ui:Refresh() end
 end
 
+-- The valid phase used to read block position: prefer the offset-0 phase, else
+-- the first surviving phase. Returns nil only if every phase died (transient,
+-- recordResult auto-recovers).
+local function alignPhase()
+    local fallback
+    for idx, p in ipairs(predictor.phases) do
+        if p.isValid then
+            if idx == 1 then return p end
+            if not fallback then fallback = p end
+        end
+    end
+    return fallback
+end
+
+-- 0-based slot (0/1/2) of the newest recorded cast within its block, or nil if
+-- no casts have been recorded since the last reset.
+--
+-- Derived from the phase's slotsFilled rather than history length, so it keeps
+-- advancing once history saturates at MAX_HISTORY. After a cast, slotsFilled is
+-- the count consumed in the *current* (next) block: 0 means the cast just
+-- completed a block (slot 2), otherwise the cast was at slotsFilled - 1.
+local function currentSlotIndex()
+    if predictorHistoryDepth <= 0 then return nil end
+    local p = alignPhase()
+    if not p then return nil end
+    local sf = p.slotsFilled
+    if sf == 0 then return 2 end
+    return sf - 1
+end
+
 -- True when the newest recorded cast filled the 3rd slot of its block,
 -- i.e. the deck just completed and is about to reshuffle.
 local function isBlockComplete()
-    local v = (3 - (convergedOffset() or 0)) % 3
-    local n = math.min(#penanceHistory, predictorHistoryDepth)
-    if n == 0 then return false end
-    return (((n - 1) + v) % 3) == 2
+    return currentSlotIndex() == 2
 end
 
 local function recordResult(result)
@@ -473,26 +500,23 @@ function deck:GetDisplayState()
         }
     end
 
-    local off = convergedOffset()
-    local calibrating = (off == nil)
-    local v = (3 - (off or 0)) % 3
+    local calibrating = (convergedOffset() == nil)
 
     local cards = { "future", "future", "future" }
-    local n = math.min(#penanceHistory, predictorHistoryDepth)
-    local currentSlot0  -- 0-based slot of the newest cast within its block
+    -- 0-based slot of the newest cast within its block (from the predictor's
+    -- block tracking, so it doesn't freeze once history saturates).
+    local currentSlot0 = currentSlotIndex()
     local procFound = false
 
-    if n > 0 then
-        local absNew = (n - 1) + v
-        local currentBlock = math.floor(absNew / 3)
-        currentSlot0 = absNew % 3
-
-        for i = 1, n do
-            local abs = (n - i) + v
-            if math.floor(abs / 3) == currentBlock then
-                local slot0 = abs % 3
-                local r = penanceHistory[i]
-                cards[slot0 + 1] = r
+    if currentSlot0 ~= nil then
+        -- Fill the current block from newest history backwards: the newest cast
+        -- (penanceHistory[1]) sits at currentSlot0, the one before it at
+        -- currentSlot0 - 1, down to slot 0. Earlier slots with no recorded cast
+        -- (only possible in the very first partial block) stay face-down.
+        for slot = 0, currentSlot0 do
+            local r = penanceHistory[currentSlot0 - slot + 1]
+            if r then
+                cards[slot + 1] = r
                 if r == RESULT_PROC then procFound = true end
             end
         end
