@@ -231,9 +231,51 @@ Current keys: `shown`, `locked`, `scale`, `opacity`, `procCheckDelayMs`,
   `addon.deck:*` / `addon.ui:*`.
 - Keep user-facing chat output minimal — the rewrite intentionally removed debug
   spam. Don't reintroduce `DEFAULT_CHAT_FRAME` debug prints in committed code.
-- Bump `## Version` in the `.toc` with user-visible changes.
+- Bump `## Version` in the `.toc` with user-visible changes. It is the single
+  source of truth for the release version — see **Releasing** below.
 - This is a Git repo. Commit messages: imperative subject, brief body explaining
   the *why*. Commit only when asked.
+
+## Releasing
+
+Distribution is automated by [BigWigsMods/packager](https://github.com/BigWigsMods/packager)
+in `.github/workflows/release.yml`, triggered by pushing a `v*` tag. It builds the
+zip (contents governed by `.pkgmeta`), generates a changelog from the commits
+since the previous tag, and uploads to a GitHub Release plus whichever addon
+sites have both an ID in the `.toc` and a matching secret in the repo.
+
+| Site | `.toc` key | Repo secret |
+|------|-----------|-------------|
+| GitHub Releases | — | `GITHUB_TOKEN` (automatic) |
+| CurseForge | `## X-Curse-Project-ID` | `CF_API_KEY` |
+| Wago | `## X-Wago-ID` | `WAGO_API_TOKEN` |
+| WoWInterface | `## X-WoWI-ID` | `WOWI_API_TOKEN` |
+
+Both halves are required — a site with no ID line, or no secret, is silently
+skipped rather than failing the build.
+
+**The `.toc` version is authoritative.** A CI step rejects the release if the tag
+disagrees with `## Version`, so the bump belongs in the release commit:
+
+```
+# 1. bump ## Version in VoidShieldTracker.toc (and the README badge)
+# 2. commit
+git tag -a v2.4.0 -m "..."
+git push origin main --follow-tags
+```
+
+Pre-release tags (`v2.4.0-alpha`, `v2.4.0-beta1`) are compared against the `.toc`
+with the suffix stripped, and the packager marks the upload as alpha/beta.
+
+Gotchas:
+
+- The packager maps each `## Interface` number to a CurseForge game version via
+  their API. If a number isn't in CF's list yet (common right after a PTR build
+  appears), the CF upload fails — wait for CF to add it or drop that interface
+  number for the release.
+- The `.toc` version is *not* keyword-substituted, deliberately: this repo is
+  cloned directly into `Interface/AddOns`, so a `@project-version@` placeholder
+  would be what the maintainer sees in-game.
 
 ## Related project
 

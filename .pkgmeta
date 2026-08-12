@@ -1,0 +1,12 @@
+package-as: VoidShieldTracker
+
+# No embedded libraries, so a separate "nolib" zip would be identical.
+enable-nolib-creation: no
+
+# Repo-only files that should not ship to players.
+ignore:
+  - AGENTS.md
+  - CLAUDE.md
+  - .gitignore
+  - .pkgmeta
+  - .github

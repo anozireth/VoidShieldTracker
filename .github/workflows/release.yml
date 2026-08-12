@@ -1,0 +1,39 @@
+name: Package and release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the packager can build a changelog from the
+          # commits since the previous tag.
+          fetch-depth: 0
+
+      - name: Check TOC version matches tag
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          base="${tag%%-*}"   # v2.4.0-beta1 -> 2.4.0
+          toc=$(sed -n 's/^## Version:[[:space:]]*//p' VoidShieldTracker.toc | tr -d '[:space:]')
+          if [ "$base" != "$toc" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME implies version $base but VoidShieldTracker.toc says $toc. Bump the TOC and re-tag."
+            exit 1
+          fi
+          echo "Version $base confirmed."
+
+      - uses: BigWigsMods/packager@v2
+        env:
+          # Missing secrets are skipped, so this works with GITHUB_OAUTH alone
+          # until the CurseForge / Wago / WoWInterface projects are approved.
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
+          WOWI_API_TOKEN: ${{ secrets.WOWI_API_TOKEN }}
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
