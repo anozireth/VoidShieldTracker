@@ -6,6 +6,12 @@
 ## IconTexture: Interface\Icons\Spell_Holy_PowerWordShield
 ## SavedVariables: VSTDB
 
+## X-Curse-Project-ID: 1649123
+## X-Wago-ID: j6jml5NR
+# Uncomment once a WoWInterface project exists; the release workflow uploads
+# only to the sites whose ID is present here.
+# ## X-WoWI-ID: 000000
+
 Core.lua
 Deck.lua
 UI.lua
