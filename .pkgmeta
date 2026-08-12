@@ -3,6 +3,12 @@ package-as: VoidShieldTracker
 # No embedded libraries, so a separate "nolib" zip would be identical.
 enable-nolib-creation: no
 
+# Hand-written release notes. Without this the packager derives them from the
+# commit log, which puts internal churn on the store pages.
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
 # Repo-only files that should not ship to players.
 ignore:
   - AGENTS.md

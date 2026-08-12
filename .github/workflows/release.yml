@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - 'v*'
+  # Re-run a release against an existing tag without re-tagging, e.g. after
+  # adding a missing upload secret:
+  #   gh workflow run release.yml --ref v2.3.0
+  workflow_dispatch:
 
 permissions:
   contents: write

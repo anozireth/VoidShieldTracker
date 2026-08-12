@@ -2,3 +2,7 @@
 *.lua.bak
 __pycache__/
 *.cache
+
+# Packager output
+*.zip
+.release/

@@ -240,9 +240,9 @@ Current keys: `shown`, `locked`, `scale`, `opacity`, `procCheckDelayMs`,
 
 Distribution is automated by [BigWigsMods/packager](https://github.com/BigWigsMods/packager)
 in `.github/workflows/release.yml`, triggered by pushing a `v*` tag. It builds the
-zip (contents governed by `.pkgmeta`), generates a changelog from the commits
-since the previous tag, and uploads to a GitHub Release plus whichever addon
-sites have both an ID in the `.toc` and a matching secret in the repo.
+zip (contents governed by `.pkgmeta`), attaches `CHANGELOG.md` as the release
+notes, and uploads to a GitHub Release plus whichever addon sites have both an ID
+in the `.toc` and a matching secret in the repo.
 
 | Site | `.toc` key | Repo secret |
 |------|-----------|-------------|
@@ -259,13 +259,28 @@ disagrees with `## Version`, so the bump belongs in the release commit:
 
 ```
 # 1. bump ## Version in VoidShieldTracker.toc (and the README badge)
-# 2. commit
+# 2. add a CHANGELOG.md section for the new version
+# 3. commit
 git tag -a v2.4.0 -m "..."
 git push origin main --follow-tags
 ```
 
 Pre-release tags (`v2.4.0-alpha`, `v2.4.0-beta1`) are compared against the `.toc`
 with the suffix stripped, and the packager marks the upload as alpha/beta.
+
+**Release notes come from `CHANGELOG.md`** (`manual-changelog` in `.pkgmeta`), not
+from the commit log — the whole file is sent, newest section first, so keep it
+written for players rather than as a commit dump.
+
+To re-run a release against a tag that already exists — after adding a missing
+upload secret, say — dispatch the workflow instead of re-tagging:
+
+```
+gh workflow run release.yml --ref v2.4.0
+```
+
+Note that this re-attempts every configured site, and one that already has that
+version may reject the duplicate.
 
 Gotchas:
 
