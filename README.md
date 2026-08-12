@@ -5,6 +5,13 @@ for **Discipline Priests** and predicts when your next proc is coming.
 
 ![Version](https://img.shields.io/badge/version-2.3.0-blue) ![WoW](https://img.shields.io/badge/WoW-12.0.7%20%7C%2012.1-orange)
 
+![The Void Shield Tracker deck display](.github/images/tracker.png)
+
+*A 12.1 deck mid-flight: three cards turned, the proc found on the second, two
+charges banked in the pips above. The last card is outlined red because this
+deck's proc is already spent — 0% — while the cast after it opens a fresh deck
+at 25%.*
+
 ## What it does
 
 The Void Shield proc works like a shuffled deck of cards: every Penance cast
@@ -89,6 +96,8 @@ Open with `/vst` or the minimap button:
 - Assume a fresh deck when entering an instance
 - Frame **scale** and **opacity**
 - **Proc detection delay** (how long after a cast the proc texture is read)
+
+![The Void Shield Tracker options panel](.github/images/options.png)
 
 ## Requirements
 
