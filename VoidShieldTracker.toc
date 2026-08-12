@@ -1,8 +1,8 @@
-## Interface: 120007
+## Interface: 120007, 120100
 ## Title: Void Shield Tracker
-## Notes: Tracks Discipline Priest Void Shield proc deck (3 cards, 1 proc)
+## Notes: Tracks the Discipline Priest Void Shield proc deck and charges (3-card/1-charge on 12.0.7, 4-card/2-charge on 12.1)
 ## Author: anozi
-## Version: 2.2.3
+## Version: 2.3.0
 ## IconTexture: Interface\Icons\Spell_Holy_PowerWordShield
 ## SavedVariables: VSTDB
 
