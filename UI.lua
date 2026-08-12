@@ -19,6 +19,12 @@ local CARD_SIZE = 46
 local CARD_GAP  = 8
 local PADDING   = 12
 
+-- Charge pips (active Void Shield proc charges), shown above the deck.
+local PIP_SIZE = 10
+local PIP_GAP  = 5
+local PIP_ON   = { 0.20, 0.90, 0.90, 1.0 }    -- cyan: charge active
+local PIP_OFF  = { 0.28, 0.28, 0.34, 0.8 }    -- dim: empty slot
+
 -- Probability colour thresholds.
 local THRESH_LO, THRESH_HI = 0.34, 0.66
 
@@ -77,9 +83,11 @@ end
 function ui:Create()
     if self.frame then return end
 
-    local totalCards = CARD_SIZE * 3 + CARD_GAP * 2
+    local cardCount  = addon.deckSize or 3
+    local maxCharges = addon.maxCharges or 1
+    local totalCards = CARD_SIZE * cardCount + CARD_GAP * (cardCount - 1)
     local width  = totalCards + PADDING * 2
-    local height = CARD_SIZE + 56
+    local height = CARD_SIZE + 70
 
     local frame = CreateFrame("Frame", "VoidShieldTrackerFrame", UIParent, "BackdropTemplate")
     frame:SetSize(width, height)
@@ -129,13 +137,26 @@ function ui:Create()
     title:SetTextColor(0.7, 0.7, 0.9)
     frame.title = title
 
+    -- Charge pips, centered just under the title.
+    frame.pips = {}
+    local pipTotal = PIP_SIZE * maxCharges + PIP_GAP * (maxCharges - 1)
+    for i = 1, maxCharges do
+        local pip = frame:CreateTexture(nil, "OVERLAY")
+        pip:SetSize(PIP_SIZE, PIP_SIZE)
+        pip:SetTexture("Interface\\Buttons\\WHITE8x8")
+        local px = -pipTotal / 2 + (PIP_SIZE + PIP_GAP) * (i - 1) + PIP_SIZE / 2
+        pip:SetPoint("TOP", title, "BOTTOM", px, -4)
+        pip:SetColorTexture(unpack(PIP_OFF))
+        frame.pips[i] = pip
+    end
+
     -- Cards
     frame.cards = {}
-    for i = 1, 3 do
+    for i = 1, cardCount do
         local card = CreateFrame("Frame", nil, frame, "BackdropTemplate")
         card:SetSize(CARD_SIZE, CARD_SIZE)
         local x = -totalCards / 2 + (CARD_SIZE + CARD_GAP) * (i - 1) + CARD_SIZE / 2
-        card:SetPoint("CENTER", frame, "CENTER", x, 2)
+        card:SetPoint("CENTER", frame, "CENTER", x, -2)
         card:SetBackdrop({
             edgeFile = "Interface\\Buttons\\WHITE8x8",
             edgeSize = 2,
@@ -179,9 +200,17 @@ function ui:Refresh()
     local s = addon.deck:GetDisplayState()
     local hr, hg, hb = probColor(s.nextProb)
 
-    for i = 1, 3 do
+    for i = 1, #frame.cards do
         local isHi = (s.highlightSlot == i)
         renderCard(frame.cards[i], s.cards[i], isHi, hr, hg, hb)
+    end
+
+    -- Charge pips: light the active ones, dim the rest.
+    if frame.pips then
+        local charges = s.charges or 0
+        for i = 1, #frame.pips do
+            frame.pips[i]:SetColorTexture(unpack(i <= charges and PIP_ON or PIP_OFF))
+        end
     end
 
     -- Readout line
@@ -486,6 +515,11 @@ _G.SlashCmdList["VST"] = function(msg)
         p("frame position reset.")
     elseif msg == "status" then
         p(addon.deck:Status())
+    elseif msg == "cdm" then
+        -- TEMPORARY diagnostic for the Cooldown Manager stack-count channels.
+        for _, line in ipairs(addon.deck:DebugCDM()) do
+            p(line)
+        end
     else
         p("commands: /vst [options|toggle|reset|resetpos|status]")
     end
